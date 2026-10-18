@@ -10,6 +10,13 @@
      STATE
      --------------------------------------------------------- */
 
+  const CLASSES = {
+    paladin: { id: "paladin", name: "TypeScript Paladin", short: "TS PALADIN", icon: "🛡️", sub: "Type-Safe Citadel" },
+    rogue: { id: "rogue", name: "JavaScript Rogue", short: "JS ROGUE", icon: "🗡️", sub: "Async Shadow" },
+    sorcerer: { id: "sorcerer", name: "Python Sorcerer", short: "PY SORCERER", icon: "🐍", sub: "Data Alchemist" },
+    artificer: { id: "artificer", name: "Rust Artificer", short: "RS ARTIFICER", icon: "⚙️", sub: "Memory Forge" }
+  };
+
   const state = {
     repositoryUrl: "",
     repository: null,
@@ -21,6 +28,7 @@
     badges: [],
     completedQuestIds: [],
     activeRegionFilter: null,
+    playerClass: "paladin",
     sfxEnabled: true,
     scanned: false,
     loading: false
@@ -42,6 +50,7 @@
         if (Array.isArray(parsed.badges)) state.badges = parsed.badges;
         if (Array.isArray(parsed.completedQuestIds)) state.completedQuestIds = parsed.completedQuestIds;
         if (typeof parsed.sfxEnabled === "boolean") state.sfxEnabled = parsed.sfxEnabled;
+        if (parsed.playerClass && CLASSES[parsed.playerClass]) state.playerClass = parsed.playerClass;
       }
     } catch (e) {
       console.warn("Could not load player profile from storage", e);
@@ -55,6 +64,7 @@
         completed: state.completed,
         badges: state.badges,
         completedQuestIds: state.completedQuestIds || [],
+        playerClass: state.playerClass,
         sfxEnabled: state.sfxEnabled
       }));
     } catch (e) {
@@ -711,11 +721,15 @@
 
     if (!state.scanned) {
       container.innerHTML = `
-                <div class="empty-state panel">
-                    <div class="empty-icon">⌁</div>
-                    <h3>Your next adventure awaits</h3>
-                    <p>Scan a repository to reveal open issues, clues, and quests.</p>
-                    <span class="empty-code mono">AWAITING_REPOSITORY_INPUT_</span>
+                <div class="empty-state dungeon-panel">
+                  <div class="empty-dungeon-art" aria-hidden="true">
+                    <span class="empty-torch">🔥</span>
+                    <div class="empty-gate"><div class="gate-arch">⌁</div></div>
+                    <span class="empty-torch">🔥</span>
+                  </div>
+                  <h3>Your next adventure awaits</h3>
+                  <p>Scan a repository to reveal open issues, clues, and quests.</p>
+                  <span class="empty-code mono">AWAITING_REPOSITORY_INPUT_</span>
                 </div>
             `;
       return;
@@ -723,11 +737,15 @@
 
     if (state.quests.length === 0) {
       container.innerHTML = `
-                <div class="empty-state panel">
-                    <div class="empty-icon">◇</div>
-                    <h3>No quests found</h3>
-                    <p>This repository did not return any open issues.</p>
-                    <span class="empty-code mono">0_ANOMALIES_DETECTED</span>
+                <div class="empty-state dungeon-panel">
+                  <div class="empty-dungeon-art" aria-hidden="true">
+                    <span class="empty-torch">🔥</span>
+                    <div class="empty-gate"><div class="gate-arch">◇</div></div>
+                    <span class="empty-torch">🔥</span>
+                  </div>
+                  <h3>No quests found</h3>
+                  <p>This repository did not return any open issues.</p>
+                  <span class="empty-code mono">0_ANOMALIES_DETECTED</span>
                 </div>
             `;
       return;
@@ -739,11 +757,15 @@
 
     if (visibleQuests.length === 0) {
       container.innerHTML = `
-                <div class="empty-state panel">
-                    <div class="empty-icon">◈</div>
-                    <h3>No quests in this sector</h3>
-                    <p>There are no open quests assigned to this region.</p>
-                    <span class="empty-code mono">SECTOR_CLEAR</span>
+                <div class="empty-state dungeon-panel">
+                  <div class="empty-dungeon-art" aria-hidden="true">
+                    <span class="empty-torch">🔥</span>
+                    <div class="empty-gate"><div class="gate-arch">◈</div></div>
+                    <span class="empty-torch">🔥</span>
+                  </div>
+                  <h3>No quests in this sector</h3>
+                  <p>There are no open quests assigned to this region.</p>
+                  <span class="empty-code mono">SECTOR_CLEAR</span>
                 </div>
             `;
       return;
@@ -836,8 +858,10 @@
     const explainButton = $("#explain-button");
     const hintButton = $("#hint-button");
     const investigationSlot = $("#investigation-slot");
+    const bossAlertBanner = $("#boss-alert-banner");
 
     if (!quest) {
+      if (bossAlertBanner) bossAlertBanner.hidden = true;
       if (briefingText) {
         briefingText.textContent = "Your companion will brief you once a quest is selected.";
       }
@@ -848,6 +872,10 @@
       if (hintButton) hintButton.disabled = true;
       if (investigationSlot) investigationSlot.innerHTML = "";
     } else {
+      if (bossAlertBanner) {
+        const isBoss = (quest.region === "swamp") || /boss|merge|conflict|critical|security|fatal/i.test(quest.title + " " + (quest.category || ""));
+        bossAlertBanner.hidden = !isBoss;
+      }
       if (briefingText) {
         if (quest.lore_intro || quest.technical_summary) {
           briefingText.innerHTML = `
@@ -1216,6 +1244,15 @@
       "success"
     );
 
+    // Check loot drops milestone
+    const newlyUnlockedLoot = LOOT_ITEMS.find((l) => l.threshold === state.completed);
+    if (newlyUnlockedLoot) {
+      setTimeout(() => {
+        playSfx("victory");
+        showMessage(`⚔️ DUNGEON LOOT UNLOCKED: [${newlyUnlockedLoot.name}] (${newlyUnlockedLoot.rarity})!`, "success");
+      }, 700);
+    }
+
     renderAll();
   }
 
@@ -1489,40 +1526,29 @@
   }
 
   /* ---------------------------------------------------------
-     STATS / HUD
+     STATS / HUD & LOOT
      --------------------------------------------------------- */
 
-  function updateStats() {
-    const xpElements = [
-      $("#xp"),
-      $("#xp-value"),
-      $('[data-stat="xp"]')
-    ];
+  const LOOT_ITEMS = [
+    { id: "dagger", threshold: 1, name: "Console.log Dagger", rarity: "Common", desc: "The first incantation every developer ever cast. Still works." },
+    { id: "shield", threshold: 2, name: "Pending PR Shield", rarity: "Rare", desc: "Awaiting review. +12 Defense while pending. No one has approved it yet." },
+    { id: "branch", threshold: 3, name: "Crystallized Branch", rarity: "Epic", desc: "A crystallised git branch. Grants the ability to revert one mistake per run." },
+    { id: "crown", threshold: 5, name: "Crown of Force Push", rarity: "Legendary", desc: "He who holds this may force-push to production. Embroidered with commit history." }
+  ];
 
-    xpElements.forEach((element) => {
-      if (element) {
-        element.textContent = state.xp;
-      }
+  function updateStats() {
+    $$(".xp-val, #xp, #xp-value, #profile-xp-value, [data-stat='xp']").forEach((el) => {
+      el.textContent = state.xp;
     });
 
-    const completedElements = [
-      $("#completed"),
-      $("#completed-value"),
-      $("#completed-count"),
-      $('[data-stat="completed"]')
-    ];
-
-    completedElements.forEach((element) => {
-      if (element) {
-        element.textContent = state.completed;
-      }
+    $$(".completed-val, #completed, #completed-value, #completed-count, #profile-completed-count, [data-stat='completed']").forEach((el) => {
+      el.textContent = state.completed;
     });
 
     const questCountElements = [
       $("#quest-count"),
       $('[data-stat="quests"]')
     ];
-
     questCountElements.forEach((element) => {
       if (element) {
         element.textContent = `${state.quests.length} QUESTS FOUND`;
@@ -1533,38 +1559,27 @@
       $("#badge-count"),
       $('[data-stat="badges"]')
     ];
-
     badgeCountElements.forEach((element) => {
       if (element) {
         element.textContent = state.badges.length;
       }
     });
 
-    const level =
-      Math.floor(state.xp / 500) + 1;
+    const level = Math.floor(state.xp / 500) + 1;
+    const levelFormatted = `LVL 0${level}`;
 
-    const levelElements = [
-      $("#level"),
-      $("#level-value"),
-      $('[data-stat="level"]')
-    ];
-
-    levelElements.forEach((element) => {
-      if (element) {
-        element.textContent = level;
-      }
+    $$("#level, #level-value, [data-stat='level']").forEach((el) => {
+      el.textContent = level;
+    });
+    $$(".level-badge, #level-badge, #profile-level-badge").forEach((el) => {
+      el.textContent = levelFormatted;
     });
 
-    const levelBadge = $("#level-badge");
-    if (levelBadge) {
-      levelBadge.textContent = `LVL 0${level}`;
-    }
-
     const levelTitles = ["ROOKIE", "APPRENTICE", "BUG HUNTER", "CODE SORCERER", "DUNGEON MASTER"];
-    const levelName = $("#level-name");
-    if (levelName) {
-      levelName.textContent = levelTitles[Math.min(level - 1, levelTitles.length - 1)];
-    }
+    const currentTitle = levelTitles[Math.min(level - 1, levelTitles.length - 1)];
+    $$("#level-name, #profile-level-name, .level-name-display").forEach((el) => {
+      el.textContent = currentTitle;
+    });
 
     const nextLevel = $("#next-level");
     if (nextLevel) {
@@ -1581,14 +1596,47 @@
       stepCount.textContent = `${current}/${total}`;
     }
 
-    const progress =
-      ((state.xp % 500) / 500) * 100;
+    const progress = ((state.xp % 500) / 500) * 100;
+    $$("#xp-progress, .xp-progress, .xp-bar-fill, .progress-fill").forEach((element) => {
+      element.style.width = `${progress}%`;
+    });
 
-    $$("#xp-progress, .xp-progress, .xp-bar-fill, .progress-fill").forEach(
-      (element) => {
-        element.style.width = `${progress}%`;
+    // Update Developer Class Displays
+    const currentClass = CLASSES[state.playerClass] || CLASSES.paladin;
+    const topbarClassIcon = $("#topbar-class-icon");
+    const topbarClassName = $("#topbar-class-name");
+    if (topbarClassIcon) topbarClassIcon.textContent = currentClass.icon;
+    if (topbarClassName) topbarClassName.textContent = currentClass.short;
+
+    const profileClassIcon = $("#profile-class-icon");
+    const profileClassName = $("#profile-class-name");
+    const profileClassSub = $("#profile-class-sub");
+    if (profileClassIcon) profileClassIcon.textContent = currentClass.icon;
+    if (profileClassName) profileClassName.textContent = currentClass.name;
+    if (profileClassSub) profileClassSub.textContent = currentClass.sub;
+
+    $$(".class-card").forEach((card) => {
+      card.classList.toggle("active", card.dataset.class === state.playerClass);
+    });
+
+    // Update Dungeon Loot Drops
+    let unlockedLoot = 0;
+    LOOT_ITEMS.forEach((item) => {
+      const isUnlocked = state.completed >= item.threshold;
+      if (isUnlocked) unlockedLoot++;
+      const slot = $(`[data-loot-id="${item.id}"]`);
+      if (slot) {
+        slot.classList.toggle("empty", !isUnlocked);
+        slot.title = isUnlocked
+          ? `[UNLOCKED] ${item.name} (${item.rarity}): ${item.desc}`
+          : `[LOCKED] ${item.name}: Clear ${item.threshold} quest${item.threshold > 1 ? "s" : ""} to unlock`;
       }
-    );
+    });
+
+    const lootCountEl = $("#loot-count");
+    if (lootCountEl) {
+      lootCountEl.textContent = `${unlockedLoot}/4 UNLOCKED`;
+    }
 
     // Update Achievement / Badge HUD
     const achName = $("#achievement-name");
@@ -1633,9 +1681,15 @@
 
     const regionMsg = $("#region-message");
     if (regionMsg) {
-      regionMsg.textContent = state.scanned
-        ? `Debugging realm active: ${state.quests.length} open quest${state.quests.length === 1 ? "" : "s"} discovered in repository.`
-        : "Scan a repository to activate the world map.";
+      if (!state.scanned) {
+        regionMsg.textContent = "Scan a repository or select any dungeon sector above to view active quests.";
+      } else if (state.activeRegionFilter) {
+        const activeNode = $(`[data-region="${state.activeRegionFilter}"]`);
+        const lore = activeNode?.dataset?.lore || "";
+        regionMsg.innerHTML = `<strong>${state.activeRegionFilter.toUpperCase()}:</strong> ${lore || "Active sector highlighted."}`;
+      } else {
+        regionMsg.textContent = `Debugging realm active: ${state.quests.length} open quest${state.quests.length === 1 ? "" : "s"} discovered in repository.`;
+      }
     }
 
     const regionCounts = { forest: 0, swamp: 0, plaza: 0, core: 0, archive: 0 };
@@ -1652,16 +1706,12 @@
       const reg = node.dataset.region;
       const count = regionCounts[reg] || 0;
       const stateSpan = node.querySelector(".node-state");
-      const countStrong = node.querySelector(".node-count");
       if (stateSpan) {
         if (!state.scanned) {
-          stateSpan.textContent = "UNSCANNED";
+          stateSpan.innerHTML = `<strong class="node-count">0</strong> QUESTS`;
         } else {
-          stateSpan.textContent = count > 0 ? `ACTIVE` : "SECURE";
+          stateSpan.innerHTML = `<strong class="node-count">${count}</strong> ${count > 0 ? "ACTIVE" : "CLEAR"}`;
         }
-      }
-      if (countStrong) {
-        countStrong.textContent = state.scanned ? String(count) : "0";
       }
     });
   }
@@ -1866,31 +1916,272 @@
     bindSearch();
     bindExplanationButtons();
 
-    // Wire #quick-demo-btn
+    // Wire #quick-demo-btn to load 5 quests across all 5 sectors
     const demoBtn = $("#quick-demo-btn");
     if (demoBtn) {
       demoBtn.addEventListener("click", () => {
         playSfx("radar");
         setRepositoryUrl("https://github.com/pallets/flask");
-        BugDungeon.loadQuests([{
-          quest_id: "quest_pallets_flask_6146",
-          quest_title: "Operation Portal Void",
-          tagline: "Forge documentation bridges into the edge computing sector.",
-          difficulty: "Novice",
-          category: "Docs & Discovery",
-          xp_reward: 150,
-          estimated_time_minutes: 25,
-          tags: ["Python", "Flask", "Documentation"],
-          briefing: {
-            lore_intro: "Incoming transmission from sector Flask...",
-            technical_summary: "Add Cloudflare Workers guide to hosting documentation."
+        state.repository = { owner: "pallets", name: "flask" };
+        BugDungeon.loadQuests([
+          {
+            quest_id: "quest_demo_forest",
+            issue_number: 1042,
+            quest_title: "The Wild Async Flora",
+            tagline: "Tame the runaway asynchronous execution threads in the Feature Forest.",
+            difficulty: "Intermediate",
+            region: "forest",
+            region_name: "Feature Forest",
+            category: "Feature Expansion",
+            xp_reward: 250,
+            estimated_time_minutes: 20,
+            tags: ["Python", "AsyncIO", "Enhancement"],
+            briefing: {
+              lore_intro: "Deep within the wild branches of the Feature Forest, uncached async streams are duplicating API calls.",
+              technical_summary: "Implement debounce cache and async context locks on high-frequency dispatchers."
+            },
+            objectives: [
+              { step: 1, title: "Recon", instruction: "Trace async event loop handlers in flask/sansio/app.py." },
+              { step: 2, title: "Locking", instruction: "Wrap concurrent task dispatchers with asyncio.Lock." },
+              { step: 3, title: "Benchmark", instruction: "Verify request throughput does not degrade under 500 req/sec." }
+            ],
+            hints: [{ level: 1, tier: "Gentle Nudge", hint: "Check functools.lru_cache or aiocache for async helpers.", xp_cost: 10 }],
+            verification_checklist: ["No duplicate task dispatches", "Zero memory leak under load"]
           },
-          objectives: [{ step: 1, title: "Recon", instruction: "Locate docs/deploying/index.rst" }],
-          hints: [{ level: 1, tier: "Gentle Nudge", hint: "Check the docs syntax.", xp_cost: 10 }],
-          verification_checklist: ["Links render correctly"]
-        }]);
+          {
+            quest_id: "quest_demo_core",
+            issue_number: 2088,
+            quest_title: "Root Architecture Convergence",
+            tagline: "Stabilize the core trunk of the codebase before the merge window collapses.",
+            difficulty: "Master",
+            region: "core",
+            region_name: "Main Branch World Tree",
+            category: "Core Architecture",
+            xp_reward: 450,
+            estimated_time_minutes: 40,
+            tags: ["Architecture", "Refactor", "Core"],
+            briefing: {
+              lore_intro: "The World Tree anchors every dependency. A circular import is choking the root.",
+              technical_summary: "Decouple the application context factory from the blueprint registries to eliminate circular references."
+            },
+            objectives: [
+              { step: 1, title: "Analyze Imports", instruction: "Map the dependency graph between app.py and blueprints.py." },
+              { step: 2, title: "Extract Factory", instruction: "Move context initialization to a standalone factory module." },
+              { step: 3, title: "Verify Tree", instruction: "Run full pytest suite to ensure backwards compatibility." }
+            ],
+            hints: [{ level: 1, tier: "Architectural Clue", hint: "Use lazy imports or dependency injection in create_app().", xp_cost: 20 }],
+            verification_checklist: ["Zero circular import warnings", "Passes pytest tests/test_app.py"]
+          },
+          {
+            quest_id: "quest_demo_plaza",
+            issue_number: 3105,
+            quest_title: "The Stalled PR of Year 100",
+            tagline: "Review a crucial community contribution that has waited 47 days for approvals.",
+            difficulty: "Novice",
+            region: "plaza",
+            region_name: "PR Plaza",
+            category: "Code Review",
+            xp_reward: 150,
+            estimated_time_minutes: 15,
+            tags: ["Good First Issue", "Community", "Review"],
+            briefing: {
+              lore_intro: "Gemma has flagged this PR for missing regression coverage. Guide the contributor to green checks.",
+              technical_summary: "Add unit tests for edge-case HTTP 429 Retry-After response header parsing."
+            },
+            objectives: [
+              { step: 1, title: "Review Diff", instruction: "Inspect the PR diff in tests/test_responses.py." },
+              { step: 2, title: "Add Cases", instruction: "Include test assertions for decimal seconds and HTTP dates." }
+            ],
+            hints: [{ level: 1, tier: "Reviewer Tip", hint: "See RFC 7231 section 7.1.3 for date formatting specs.", xp_cost: 10 }],
+            verification_checklist: ["Unit tests cover malformed headers", "Gemma approves the diff"]
+          },
+          {
+            quest_id: "quest_demo_swamp",
+            issue_number: 4099,
+            quest_title: "The Null Pointer Hydra",
+            tagline: "An ancient Merge Conflict beast lurks beneath the murky stack traces.",
+            difficulty: "Expert",
+            region: "swamp",
+            region_name: "Bug Swamp",
+            category: "Bug Bounty",
+            xp_reward: 500,
+            estimated_time_minutes: 45,
+            tags: ["Bug", "Critical", "Crash"],
+            briefing: {
+              lore_intro: "<<<<<<< HEAD: Uncaught TypeError: undefined has no properties. >>>>>>> main. The Merge Conflict stirs!",
+              technical_summary: "Implement defensive null-coalescing guards across request parsing routines to prevent unhandled 500 crashes."
+            },
+            objectives: [
+              { step: 1, title: "Trap Exception", instruction: "Reproduce the crash with malformed JSON payloads in request.get_json()." },
+              { step: 2, title: "Slay the Bug", instruction: "Replace unchecked property accesses with safe .get() defaults." },
+              { step: 3, title: "Sanitize Swamp", instruction: "Ensure proper 400 Bad Request error response is returned." }
+            ],
+            hints: [{ level: 1, tier: "Boss Weakness", hint: "Check werkzeug.exceptions.BadRequest handling.", xp_cost: 25 }],
+            verification_checklist: ["Crash no longer produces 500 internal server error", "Malformed JSON returns clean 400"]
+          },
+          {
+            quest_id: "quest_demo_archive",
+            issue_number: 5012,
+            quest_title: "The Legacy Fortran Scroll",
+            tagline: "Decipher ancient comments written in Year 12 that still somehow compile.",
+            difficulty: "Novice",
+            region: "archive",
+            region_name: "Deprecated Archive",
+            category: "Documentation",
+            xp_reward: 175,
+            estimated_time_minutes: 20,
+            tags: ["Docs", "Archive", "Cleanup"],
+            briefing: {
+              lore_intro: "A dusty corridor in the archive contains undocumented routines with arcane parameters.",
+              technical_summary: "Convert legacy docstrings in flask/helpers.py to standard Sphinx Google-format documentation."
+            },
+            objectives: [
+              { step: 1, title: "Decipher", instruction: "Read undocumented parameters in send_from_directory()." },
+              { step: 2, title: "Inscribe", instruction: "Write comprehensive type signatures and example snippets." }
+            ],
+            hints: [{ level: 1, tier: "Archive Scribe", hint: "Follow the Google Python Style Guide docstring format.", xp_cost: 10 }],
+            verification_checklist: ["Sphinx build succeeds with zero docstring warnings"]
+          }
+        ]);
+        showMessage("⚡ Loaded 5-sector demo! Explore the Overworld Map sectors.", "success");
       });
     }
+
+    // Wire Developer Class Cards
+    $$(".class-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const clsId = card.dataset.class;
+        if (CLASSES[clsId]) {
+          state.playerClass = clsId;
+          playSfx("select");
+          savePlayerState();
+          updateStats();
+          const cls = CLASSES[clsId];
+          showMessage(`Class aligned: ${cls.name} (${cls.sub})!`, "info");
+        }
+      });
+    });
+
+    // Wire NPC Cards & Dialogue Modal
+    const NPC_DATA = {
+      nyx: {
+        name: "NYX",
+        role: "AI COMPANION · TACTICAL ANALYST",
+        avatar: "🧙‍♀️",
+        speech: `<p>“I study the syntax shadows and decompile bytecode anomalies. In the GitVerse, bugs are not mere errors — they are corrupted bosses waiting for a worthy investigator.</p><p>Consult me anytime during your quest for tactical hints or issue deconstruction!”</p>`
+      },
+      merge_conflict: {
+        name: "THE MERGE CONFLICT",
+        role: "ANCIENT ANTAGONIST · FINAL BOSS",
+        avatar: "⚔️",
+        speech: `<p><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD: You thought this was resolved.<br>=======<br>&gt;&gt;&gt;&gt;&gt;&gt;&gt; main: I have festered since Year 100.</code></p><p>“I am not evil — just unresolved. A PR opened eons ago that gained sentience. I do not wish to destroy the GitVerse... I just want to be merged.”</p>`
+      },
+      aria: {
+        name: "ARIA",
+        role: "DEPLOYER GUIDE · SHIP CAPTAIN",
+        avatar: "🏹",
+        speech: `<p>“Ship captain of the GitVerse! I keep our deployment pipelines green and ship artifacts to edge sectors. Chaos stresses me out, but we handle it anyway.</p><p>Be careful when venturing into the Bug Swamp — uncaught exceptions lurk in the murk!”</p>`
+      },
+      linus: {
+        name: "LINUS",
+        role: "LEGENDARY NPC · ANCIENT COMMITTER",
+        avatar: "👁️",
+        speech: `<p>“Fellow developer, I've been watching your commit graph. Every PR you merged, every late-night deploy — they weren't just work. They were training.</p><p>In the GitVerse, your code has weight. Your consistency has power. Those 3,000 commits? They forged a warrior.”</p>`
+      },
+      gemma: {
+        name: "GEMMA",
+        role: "HEALER NPC · CODE REVIEWER",
+        avatar: "✨",
+        speech: `<p>“Meticulous, kind, never harsh. I was supposed to review the original Schism PR in Year 100, but I was busy. That is my deepest regret — and the reason I review every PR without exception now.</p><p>Write clean diffs and take your time; quality code heals the realm.”</p>`
+      }
+    };
+
+    const modal = $("#npc-dialogue-modal");
+    const modalAvatar = $("#modal-npc-avatar");
+    const modalName = $("#modal-npc-name");
+    const modalRole = $("#modal-npc-role");
+    const modalSpeech = $("#modal-npc-speech");
+    const closeModal = () => {
+      if (modal) modal.hidden = true;
+    };
+
+    $$("[data-npc]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const npcKey = btn.dataset.npc;
+        const npc = NPC_DATA[npcKey];
+        if (npc && modal) {
+          playSfx("nyx");
+          if (modalAvatar) modalAvatar.textContent = npc.avatar;
+          if (modalName) modalName.textContent = npc.name;
+          if (modalRole) modalRole.textContent = npc.role;
+          if (modalSpeech) modalSpeech.innerHTML = npc.speech;
+          modal.hidden = false;
+        }
+      });
+    });
+
+    const closeBtn = $("#modal-close-btn");
+    const backdrop = $("#npc-modal-close-backdrop");
+    if (closeBtn) closeBtn.addEventListener("click", closeModal);
+    if (backdrop) backdrop.addEventListener("click", closeModal);
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && modal && !modal.hidden) closeModal();
+    });
+
+    // Wire Linus Wisdom Button
+    const LINUS_WISDOMS = [
+      "“Fellow developer, every PR you merged, every bug you squashed — they were training. In the GitVerse, your consistency has power.”",
+      "“Talk is cheap. Show me the code.”",
+      "“That 47-day streak? It's not just a number on a graph. It's a legendary buff that fuels your spells.”",
+      "“Bad programmers worry about the code. Good programmers worry about data structures and their relationships.”",
+      "“A git commit is a promise to the future. Make your messages worthy of an epic chronicle.”",
+      "“He who holds the Crown of Force Push may override production, but true masters never need it.”"
+    ];
+    let wisdomIndex = 0;
+    const wisdomBtn = $("#wisdom-btn");
+    const ancientQuote = $("#ancient-quote");
+    if (wisdomBtn && ancientQuote) {
+      wisdomBtn.addEventListener("click", () => {
+        playSfx("check");
+        wisdomIndex = (wisdomIndex + 1) % LINUS_WISDOMS.length;
+        ancientQuote.innerHTML = `<em>${LINUS_WISDOMS[wisdomIndex]}</em>`;
+      });
+    }
+
+    // Wire Loot Slots Hover & Click
+    $$(".loot-slot").forEach((slot) => {
+      const showDetail = () => {
+        const lootId = slot.dataset.lootId;
+        const item = LOOT_ITEMS.find((l) => l.id === lootId);
+        const detailEl = $("#loot-detail");
+        if (item && detailEl) {
+          const unlocked = state.completed >= item.threshold;
+          detailEl.innerHTML = unlocked
+            ? `<strong style="color:var(--gold);">${item.name}</strong> [${item.rarity}] &middot; ${item.desc}`
+            : `<span style="color:var(--muted);">${item.name} (LOCKED) &middot; Requires ${item.threshold} completed quest${item.threshold > 1 ? "s" : ""}.</span>`;
+        }
+      };
+      slot.addEventListener("mouseenter", showDetail);
+      slot.addEventListener("click", () => {
+        playSfx("select");
+        showDetail();
+      });
+    });
+
+    // Wire Region Node Hover Lore Tooltips
+    $$(".region-node").forEach((node) => {
+      node.addEventListener("mouseenter", () => {
+        const lore = node.dataset.lore;
+        const regionMsg = $("#region-message");
+        const nodeTitle = node.querySelector(".node-title")?.textContent || "";
+        if (lore && regionMsg) {
+          regionMsg.innerHTML = `<strong>${nodeTitle}:</strong> ${lore}`;
+        }
+      });
+      node.addEventListener("mouseleave", () => {
+        updateWorldState();
+      });
+    });
 
     // Wire #sfx-toggle
     const sfxBtn = $("#sfx-toggle");
