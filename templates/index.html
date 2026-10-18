@@ -28,6 +28,9 @@
       </a>
 
       <div class="topbar-right">
+        <button id="sfx-toggle" class="sfx-btn mono" type="button" title="Toggle retro 8-bit sound effects" aria-label="Toggle SFX">
+          <span class="sfx-icon">🔊</span> SFX: ON
+        </button>
         <span class="status-dot"></span>
         <span class="mono">SYSTEM ONLINE</span>
         <span class="version mono">BETA 0.2</span>
@@ -90,59 +93,82 @@
         <div class="world-map panel">
           <div class="map-header">
             <div>
-              <span class="map-kicker mono">LIVE REPOSITORY TERRITORY</span>
+              <span class="map-kicker mono">LIVE REPOSITORY OVERWORLD</span>
               <h2>THE DEBUGGING REALM</h2>
             </div>
-            <div class="map-coordinates mono" id="map-coordinates">SECTOR 00 · UNINITIALIZED</div>
+            <div class="map-header-actions">
+              <button id="quick-demo-btn" type="button" class="button button-ghost" title="Load sample quest for instant testing">
+                <span>⚡ Load Sector: Flask Demo</span>
+              </button>
+              <div class="map-coordinates mono" id="map-coordinates">SECTOR 00 · UNINITIALIZED</div>
+            </div>
           </div>
 
           <div class="map-stage" id="map-stage">
-            <div class="map-stars" aria-hidden="true"></div>
-            <div class="map-grid" aria-hidden="true"></div>
+            <div class="map-vignette" aria-hidden="true"></div>
+            <div class="map-spores" aria-hidden="true"></div>
 
-            <div class="route route-a"></div>
-            <div class="route route-b"></div>
-            <div class="route route-c"></div>
-
-            <button class="region-node region-forest" type="button" data-region="forest">
-              <span class="node-icon">♧</span>
-              <span class="node-name">GLITCH FOREST</span>
-              <span class="node-state">UNSCANNED</span>
+            <!-- Sector 1: Feature Forest (Left) -->
+            <button class="region-node region-forest" type="button" data-region="forest" title="Feature Forest — Enhancements & New Features">
+              <span class="node-beacon green"></span>
+              <span class="node-icon">🌲</span>
+              <div class="node-tag mono">
+                <span class="node-title">FEATURE FOREST</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
             </button>
 
-            <button class="region-node region-swamp" type="button" data-region="swamp">
-              <span class="node-icon">◈</span>
-              <span class="node-name">STACK SWAMP</span>
-              <span class="node-state">UNSCANNED</span>
-            </button>
-
-            <button class="region-node region-citadel" type="button" data-region="citadel">
-              <span class="node-icon">◇</span>
-              <span class="node-name">COMMIT CITADEL</span>
-              <span class="node-state">LOCKED</span>
-            </button>
-
-            <button class="region-node region-wastes" type="button" data-region="wastes">
-              <span class="node-icon">△</span>
-              <span class="node-name">NULL WASTES</span>
-              <span class="node-state">LOCKED</span>
-            </button>
-
-            <button class="region-node region-core" type="button" data-region="core">
+            <!-- Sector 2: Main Branch World Tree (Center) -->
+            <button class="region-node region-core" type="button" data-region="core" title="Main Branch World Tree — Core Architecture & Bosses">
+              <span class="node-beacon purple"></span>
               <span class="node-icon">✦</span>
-              <span class="node-name">WORLD TREE</span>
-              <span class="node-state">CORE</span>
+              <div class="node-tag mono">
+                <span class="node-title">WORLD TREE</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Sector 3: Pull Request Plaza (Bottom Center) -->
+            <button class="region-node region-plaza" type="button" data-region="plaza" title="Pull Request Plaza — Safe Haven & Starter Quests">
+              <span class="node-beacon gold"></span>
+              <span class="node-icon">🏰</span>
+              <div class="node-tag mono">
+                <span class="node-title">PR PLAZA</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Sector 4: Bug Swamp (Lower Right) -->
+            <button class="region-node region-swamp" type="button" data-region="swamp" title="Bug Swamp — Runtime Errors, Bugs & Crashes">
+              <span class="node-beacon red"></span>
+              <span class="node-icon">🪲</span>
+              <div class="node-tag mono">
+                <span class="node-title">BUG SWAMP</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Sector 5: Deprecated Archive (Upper Right) -->
+            <button class="region-node region-archive" type="button" data-region="archive" title="Deprecated Archive — Documentation, Discovery & Legacy Code">
+              <span class="node-beacon cyan"></span>
+              <span class="node-icon">🏛</span>
+              <div class="node-tag mono">
+                <span class="node-title">DEPRECATED ARCHIVE</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
             </button>
 
             <div class="map-legend">
-              <span><i class="legend-dot unlocked"></i> AVAILABLE</span>
-              <span><i class="legend-dot locked"></i> LOCKED</span>
-              <span><i class="legend-dot core"></i> CORE</span>
+              <span class="legend-item"><i class="legend-dot green"></i> FEATURE FOREST</span>
+              <span class="legend-item"><i class="legend-dot purple"></i> WORLD TREE</span>
+              <span class="legend-item"><i class="legend-dot gold"></i> PR PLAZA</span>
+              <span class="legend-item"><i class="legend-dot red"></i> BUG SWAMP</span>
+              <span class="legend-item"><i class="legend-dot cyan"></i> ARCHIVE</span>
             </div>
           </div>
 
           <div id="region-message" class="region-message">
-            Scan a repository to activate the world map.
+            Scan a repository or click any sector on the overworld map to explore quests.
           </div>
         </div>
 

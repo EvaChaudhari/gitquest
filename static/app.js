@@ -19,9 +19,138 @@
     xp: 0,
     completed: 0,
     badges: [],
+    completedQuestIds: [],
+    activeRegionFilter: null,
+    sfxEnabled: true,
     scanned: false,
     loading: false
   };
+
+  /* ---------------------------------------------------------
+     PERSISTENCE & 8-BIT AUDIO SYNTHESIZER
+     --------------------------------------------------------- */
+
+  const STORAGE_KEY = "bug_dungeon_player_v1";
+
+  function loadPlayerState() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.xp === "number") state.xp = parsed.xp;
+        if (typeof parsed.completed === "number") state.completed = parsed.completed;
+        if (Array.isArray(parsed.badges)) state.badges = parsed.badges;
+        if (Array.isArray(parsed.completedQuestIds)) state.completedQuestIds = parsed.completedQuestIds;
+        if (typeof parsed.sfxEnabled === "boolean") state.sfxEnabled = parsed.sfxEnabled;
+      }
+    } catch (e) {
+      console.warn("Could not load player profile from storage", e);
+    }
+  }
+
+  function savePlayerState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        xp: state.xp,
+        completed: state.completed,
+        badges: state.badges,
+        completedQuestIds: state.completedQuestIds || [],
+        sfxEnabled: state.sfxEnabled
+      }));
+    } catch (e) {
+      console.warn("Could not save player profile to storage", e);
+    }
+  }
+
+  let audioCtx = null;
+  function getAudioContext() {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+      }
+    }
+    if (audioCtx && audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+    return audioCtx;
+  }
+
+  function playSfx(type) {
+    if (!state.sfxEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+
+      if (type === "click" || type === "select") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(580, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+        gain.gain.setValueAtTime(0.08, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.08);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      } else if (type === "radar" || type === "node") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(220, now + 0.18);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.18);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.18);
+      } else if (type === "step" || type === "check") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.setValueAtTime(659, now + 0.06);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.15);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      } else if (type === "complete" || type === "victory") {
+        const notes = [523.25, 659.25, 783.99, 1046.5];
+        notes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "square";
+          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+          gain.gain.setValueAtTime(0.06, now + idx * 0.08);
+          gain.gain.linearRampToValueAtTime(0.001, now + idx * 0.08 + 0.14);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.08);
+          osc.stop(now + idx * 0.08 + 0.15);
+        });
+      } else if (type === "transmission" || type === "nyx") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(320, now);
+        osc.frequency.exponentialRampToValueAtTime(640, now + 0.05);
+        osc.frequency.exponentialRampToValueAtTime(480, now + 0.1);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.12);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.12);
+      }
+    } catch (e) {
+      // Audio policy catch
+    }
+  }
 
   /* ---------------------------------------------------------
      DOM HELPERS
@@ -398,6 +527,50 @@
         ? item.verification_checklist
         : (Array.isArray(item.checklist) ? item.checklist : []);
 
+      // Sector landmark auto-assignment
+      let region = item.region || "";
+      let regionName = item.region_name || "";
+      const textToClassify = [
+        title,
+        category,
+        tagline,
+        techSummary,
+        body,
+        ...labels
+      ].join(" ").toLowerCase();
+
+      if (!region) {
+        if (/doc|documentation|guide|manual|archive|legacy|deprecated|discovery|tutorial|reference/.test(textToClassify)) {
+          region = "archive";
+          regionName = "Deprecated Archive";
+        } else if (/bug|fix|error|crash|fault|fail|leak|broken|problem|vulnerability|swamp/.test(textToClassify)) {
+          region = "swamp";
+          regionName = "Bug Swamp";
+        } else if (/pr|pull request|first issue|good first|novice|beginner|starter|plaza|community/.test(textToClassify)) {
+          region = "plaza";
+          regionName = "Pull Request Plaza";
+        } else if (/core|architecture|refactor|tree|root|engine|perf|performance|context|realm|system/.test(textToClassify)) {
+          region = "core";
+          regionName = "Main Branch World Tree";
+        } else if (/feat|feature|add|new|enhancement|forest|gateway|forge|stream/.test(textToClassify)) {
+          region = "forest";
+          regionName = "Feature Forest";
+        } else {
+          const fallbackRegions = [
+            { id: "forest", name: "Feature Forest" },
+            { id: "core", name: "Main Branch World Tree" },
+            { id: "plaza", name: "Pull Request Plaza" },
+            { id: "swamp", name: "Bug Swamp" },
+            { id: "archive", name: "Deprecated Archive" }
+          ];
+          const choice = fallbackRegions[index % fallbackRegions.length];
+          region = choice.id;
+          regionName = choice.name;
+        }
+      }
+
+      const isCompleted = state.completedQuestIds?.includes(questId) || item.status === "completed";
+
       return {
         ...item,
         id: questId,
@@ -415,10 +588,12 @@
         briefing: item.briefing,
         labels,
         tags: labels,
+        region,
+        region_name: regionName,
         difficulty,
         xp,
         xp_reward: xp,
-        status: item.status || "available",
+        status: isCompleted ? "completed" : (item.status || "available"),
         raw_hints: rawHints,
         hints: formattedHints.length ? formattedHints : [
           `Analyze the objectives for "${title}".`,
@@ -529,7 +704,6 @@
       $('[data-region="quests"]')
     );
   }
-
   function renderQuestList() {
     const container = findQuestContainer();
 
@@ -559,29 +733,38 @@
       return;
     }
 
-    container.innerHTML = state.quests
-      .map((quest, index) => {
-        const selected =
-          state.selectedQuest?.id === quest.id;
+    const visibleQuests = state.activeRegionFilter
+      ? state.quests.filter((q) => q.region === state.activeRegionFilter)
+      : state.quests;
 
-        const completed =
-          quest.status === "completed";
+    if (visibleQuests.length === 0) {
+      container.innerHTML = `
+                <div class="empty-state panel">
+                    <div class="empty-icon">◈</div>
+                    <h3>No quests in this sector</h3>
+                    <p>There are no open quests assigned to this region.</p>
+                    <span class="empty-code mono">SECTOR_CLEAR</span>
+                </div>
+            `;
+      return;
+    }
 
+    container.innerHTML = visibleQuests
+      .map((quest) => {
+        const selected = state.selectedQuest?.id === quest.id;
+        const completed = quest.status === "completed";
         const difficultyLower = String(quest.difficulty || "medium").toLowerCase();
-        const isGood = difficultyLower === "easy";
+        const isGood = difficultyLower === "easy" || difficultyLower === "novice";
 
         return `
                     <article
                         class="issue-card quest-card ${selected ? "selected" : ""} ${completed ? "cleared completed" : ""}"
-                        data-quest-index="${index}"
+                        data-quest-id="${escapeHtml(String(quest.id))}"
                         tabindex="0"
                         role="button"
                     >
                         <div class="issue-top quest-card-top">
-                            <span class="issue-number quest-number mono">
-                                #${escapeHtml(quest.number)}
-                            </span>
-
+                            <span class="issue-number quest-number mono">#${escapeHtml(quest.number)}</span>
                             <span class="issue-label quest-difficulty ${isGood ? "good" : ""} difficulty-${escapeHtml(difficultyLower)}">
                                 ${escapeHtml(quest.category ? quest.category + " · " : "")}${escapeHtml(String(quest.difficulty || "MEDIUM").toUpperCase())} · +${quest.xp} XP
                             </span>
@@ -598,16 +781,16 @@
 
                         <div class="issue-footer quest-card-bottom">
                             <div class="labels">
+                                <span class="sector-chip sector-${escapeHtml(quest.region || "core")}">${escapeHtml(quest.region_name || quest.region || "Sector")}</span>
                                 ${quest.labels && quest.labels.length
-                                  ? quest.labels.slice(0, 3).map(l => `<span class="label-chip">${escapeHtml(l)}</span>`).join("")
-                                  : `<span class="label-chip">${escapeHtml(quest.region_name || "Dungeon Sector")}</span>`
+                                  ? quest.labels.slice(0, 2).map((l) => `<span class="label-chip">${escapeHtml(l)}</span>`).join("")
+                                  : ""
                                 }
                                 ${quest.estimated_time_minutes
-                                  ? `<span class="label-chip mono" style="color: #6de8ef; border-color: rgba(109,232,239,0.3);">⏱ ${escapeHtml(quest.estimated_time_minutes)}m</span>`
+                                  ? `<span class="label-chip mono" style="color:#6de8ef;border-color:rgba(109,232,239,0.3);">⏱ ${escapeHtml(quest.estimated_time_minutes)}m</span>`
                                   : ""
                                 }
                             </div>
-
                             <span class="select-quest mono">
                                 ${completed ? "CLEARED ✓" : (selected ? "INVESTIGATING ⚔" : "SELECT QUEST →")}
                             </span>
@@ -618,19 +801,30 @@
       .join("");
 
     $$(".quest-card, .issue-card").forEach((card) => {
-      const index = Number(card.dataset.questIndex);
+      const questId = card.dataset.questId;
 
       card.addEventListener("click", () => {
-        selectQuest(index);
+        selectQuestById(questId);
       });
 
       card.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          selectQuest(index);
+          selectQuestById(questId);
         }
       });
     });
+  }
+
+  function selectQuestById(id) {
+    const quest = state.quests.find((q) => String(q.id) === String(id));
+    if (!quest) return;
+    state.selectedQuest = quest;
+    state.currentStep = 0;
+    playSfx("select");
+    renderAll();
+    const detail = $(".briefing-panel") || $("#quest-detail") || $("#quest-panel") || $(".quest-detail");
+    if (detail) detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function renderSelectedQuest() {
@@ -1010,6 +1204,12 @@
     state.xp += Number(quest.xp) || 0;
 
     unlockBadges();
+
+    if (!state.completedQuestIds) state.completedQuestIds = [];
+    state.completedQuestIds.push(quest.quest_id || quest.id);
+    savePlayerState();
+
+    playSfx("complete");
 
     showMessage(
       `Quest complete! +${quest.xp} XP`,
@@ -1438,7 +1638,7 @@
         : "Scan a repository to activate the world map.";
     }
 
-    const regionCounts = { forest: 0, swamp: 0, citadel: 0, wastes: 0, core: 0 };
+    const regionCounts = { forest: 0, swamp: 0, plaza: 0, core: 0, archive: 0 };
     const regionKeys = Object.keys(regionCounts);
 
     state.quests.forEach((q, idx) => {
@@ -1452,12 +1652,16 @@
       const reg = node.dataset.region;
       const count = regionCounts[reg] || 0;
       const stateSpan = node.querySelector(".node-state");
+      const countStrong = node.querySelector(".node-count");
       if (stateSpan) {
         if (!state.scanned) {
-          stateSpan.textContent = reg === "core" ? "CORE" : (reg === "citadel" || reg === "wastes" ? "LOCKED" : "UNSCANNED");
+          stateSpan.textContent = "UNSCANNED";
         } else {
-          stateSpan.textContent = count > 0 ? `ACTIVE (${count})` : "SECURE";
+          stateSpan.textContent = count > 0 ? `ACTIVE` : "SECURE";
         }
+      }
+      if (countStrong) {
+        countStrong.textContent = state.scanned ? String(count) : "0";
       }
     });
   }
@@ -1629,33 +1833,24 @@
       });
     });
 
-    // Bind region map nodes to filter by region
+    // Bind region map nodes to filter by region using state.activeRegionFilter
     $$(".region-node").forEach((node) => {
       node.addEventListener("click", () => {
         const regionId = node.dataset.region;
-        const regionFilter = $("#quest-filter");
-
-        if (node.classList.contains("active")) {
-          node.classList.remove("active");
-          filterQuests("");
-          if (regionFilter) regionFilter.textContent = "ALL REGIONS";
+        playSfx("node");
+        if (state.activeRegionFilter === regionId) {
+          state.activeRegionFilter = null;
+          $$(".region-node").forEach((n) => n.classList.remove("active"));
+          const rf = $("#quest-filter");
+          if (rf) rf.textContent = "ALL REGIONS";
         } else {
+          state.activeRegionFilter = regionId;
           $$(".region-node").forEach((n) => n.classList.remove("active"));
           node.classList.add("active");
-          const regName = node.querySelector(".node-name")?.textContent || regionId;
-          if (regionFilter) regionFilter.textContent = regName;
-
-          // Filter cards belonging to this region
-          $$(".quest-card, .issue-card").forEach((card) => {
-            const idx = Number(card.dataset.questIndex);
-            const quest = state.quests[idx];
-            if (quest && (quest.region === regionId || card.textContent.toLowerCase().includes(regionId))) {
-              card.style.display = "";
-            } else {
-              card.style.display = "none";
-            }
-          });
+          const rf = $("#quest-filter");
+          if (rf) rf.textContent = node.querySelector(".node-title")?.textContent || regionId.toUpperCase();
         }
+        renderQuestList();
       });
     });
   }
@@ -1665,9 +1860,51 @@
      --------------------------------------------------------- */
 
   function init() {
+    loadPlayerState();
+
     bindScanButtons();
     bindSearch();
     bindExplanationButtons();
+
+    // Wire #quick-demo-btn
+    const demoBtn = $("#quick-demo-btn");
+    if (demoBtn) {
+      demoBtn.addEventListener("click", () => {
+        playSfx("radar");
+        setRepositoryUrl("https://github.com/pallets/flask");
+        BugDungeon.loadQuests([{
+          quest_id: "quest_pallets_flask_6146",
+          quest_title: "Operation Portal Void",
+          tagline: "Forge documentation bridges into the edge computing sector.",
+          difficulty: "Novice",
+          category: "Docs & Discovery",
+          xp_reward: 150,
+          estimated_time_minutes: 25,
+          tags: ["Python", "Flask", "Documentation"],
+          briefing: {
+            lore_intro: "Incoming transmission from sector Flask...",
+            technical_summary: "Add Cloudflare Workers guide to hosting documentation."
+          },
+          objectives: [{ step: 1, title: "Recon", instruction: "Locate docs/deploying/index.rst" }],
+          hints: [{ level: 1, tier: "Gentle Nudge", hint: "Check the docs syntax.", xp_cost: 10 }],
+          verification_checklist: ["Links render correctly"]
+        }]);
+      });
+    }
+
+    // Wire #sfx-toggle
+    const sfxBtn = $("#sfx-toggle");
+    if (sfxBtn) {
+      sfxBtn.classList.toggle("muted", !state.sfxEnabled);
+      sfxBtn.textContent = state.sfxEnabled ? "🔊 SFX: ON" : "🔇 SFX: OFF";
+      sfxBtn.addEventListener("click", () => {
+        state.sfxEnabled = !state.sfxEnabled;
+        sfxBtn.classList.toggle("muted", !state.sfxEnabled);
+        sfxBtn.textContent = state.sfxEnabled ? "🔊 SFX: ON" : "🔇 SFX: OFF";
+        if (state.sfxEnabled) playSfx("click");
+        savePlayerState();
+      });
+    }
 
     renderAll();
 
@@ -1677,13 +1914,8 @@
      */
 
     try {
-      const params =
-        new URLSearchParams(
-          window.location.search
-        );
-
+      const params = new URLSearchParams(window.location.search);
       const repo = params.get("repo");
-
       if (repo) {
         setRepositoryUrl(repo);
       }
@@ -1720,6 +1952,7 @@
     loadQuests,
     scanRepository,
     selectQuest,
+    selectQuestById,
     completeQuest,
     requestHint,
     requestExplanation,
