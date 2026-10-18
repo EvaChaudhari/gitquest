@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090711">
+  <meta name="description" content="BUG//DUNGEON — turn GitHub issues into debugging quests.">
+  <title>BUG//DUNGEON — Developer Quest System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <div class="grid-overlay"></div>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="BUG Dungeon home">
+        <span class="brand-mark">⌘</span>
+        <span>BUG<span class="accent">//</span>DUNGEON</span>
+      </a>
+
+      <div class="topbar-right">
+        <span class="status-dot"></span>
+        <span class="mono">SYSTEM ONLINE</span>
+        <span class="version mono">BETA 0.2</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="eyebrow">
+          <span class="eyebrow-line"></span>
+          DEVELOPER QUEST SYSTEM
+          <span class="eyebrow-line"></span>
+        </div>
+        <h1>Every bug is a <span class="gradient-text">boss fight.</span></h1>
+        <p class="hero-copy">
+          Enter a repository. Explore the dungeon. Investigate the issues.
+          Level up your debugging instincts.
+        </p>
+      </section>
+
+      <section class="repo-panel panel" aria-labelledby="repo-title">
+        <div class="panel-heading">
+          <div>
+            <span class="section-kicker">01 / INITIALIZE</span>
+            <h2 id="repo-title">Choose your dungeon</h2>
+          </div>
+          <span class="pill pill-purple">REPOSITORY SCAN</span>
+        </div>
+
+        <form id="repo-form" class="repo-form">
+          <label for="repo-url">GITHUB REPOSITORY URL</label>
+
+          <div class="input-row">
+            <span class="input-prefix">↳</span>
+            <input id="repo-url" name="repo_url" type="url" placeholder="https://github.com/owner/repository"
+              autocomplete="url" spellcheck="false" required>
+            <button id="scan-button" class="button button-primary" type="submit">
+              <span class="button-label">Scan repository</span>
+              <span aria-hidden="true">↗</span>
+            </button>
+          </div>
+
+          <p class="field-hint">
+            Paste a public GitHub repository URL to reveal its issue quests.
+          </p>
+        </form>
+
+        <div id="global-status" class="status-message" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <section id="quest-workspace" class="workspace" aria-live="polite">
+        <div class="section-title-row">
+          <div>
+            <span class="section-kicker">02 / THE REALM</span>
+            <h2>Dungeon world</h2>
+          </div>
+          <div class="quest-count mono" id="quest-count">0 QUESTS FOUND</div>
+        </div>
+
+        <div class="world-map panel">
+          <div class="map-header">
+            <div>
+              <span class="map-kicker mono">LIVE REPOSITORY TERRITORY</span>
+              <h2>THE DEBUGGING REALM</h2>
+            </div>
+            <div class="map-coordinates mono" id="map-coordinates">SECTOR 00 · UNINITIALIZED</div>
+          </div>
+
+          <div class="map-stage" id="map-stage">
+            <div class="map-stars" aria-hidden="true"></div>
+            <div class="map-grid" aria-hidden="true"></div>
+
+            <div class="route route-a"></div>
+            <div class="route route-b"></div>
+            <div class="route route-c"></div>
+
+            <button class="region-node region-forest" type="button" data-region="forest">
+              <span class="node-icon">♧</span>
+              <span class="node-name">GLITCH FOREST</span>
+              <span class="node-state">UNSCANNED</span>
+            </button>
+
+            <button class="region-node region-swamp" type="button" data-region="swamp">
+              <span class="node-icon">◈</span>
+              <span class="node-name">STACK SWAMP</span>
+              <span class="node-state">UNSCANNED</span>
+            </button>
+
+            <button class="region-node region-citadel" type="button" data-region="citadel">
+              <span class="node-icon">◇</span>
+              <span class="node-name">COMMIT CITADEL</span>
+              <span class="node-state">LOCKED</span>
+            </button>
+
+            <button class="region-node region-wastes" type="button" data-region="wastes">
+              <span class="node-icon">△</span>
+              <span class="node-name">NULL WASTES</span>
+              <span class="node-state">LOCKED</span>
+            </button>
+
+            <button class="region-node region-core" type="button" data-region="core">
+              <span class="node-icon">✦</span>
+              <span class="node-name">WORLD TREE</span>
+              <span class="node-state">CORE</span>
+            </button>
+
+            <div class="map-legend">
+              <span><i class="legend-dot unlocked"></i> AVAILABLE</span>
+              <span><i class="legend-dot locked"></i> LOCKED</span>
+              <span><i class="legend-dot core"></i> CORE</span>
+            </div>
+          </div>
+
+          <div id="region-message" class="region-message">
+            Scan a repository to activate the world map.
+          </div>
+        </div>
+
+        <div class="section-title-row quest-heading">
+          <div>
+            <span class="section-kicker">03 / QUEST BOARD</span>
+            <h2>Available quests</h2>
+          </div>
+          <div class="quest-filter mono" id="quest-filter">ALL REGIONS</div>
+        </div>
+
+        <div class="workspace-grid">
+          <div class="quest-column">
+            <div id="issues-list" class="issues-list">
+              <div class="empty-state panel">
+                <div class="empty-icon">⌁</div>
+                <h3>Your next adventure awaits</h3>
+                <p>Scan a repository to reveal open issues, clues, and quests.</p>
+                <span class="empty-code mono">AWAITING_REPOSITORY_INPUT_</span>
+              </div>
+            </div>
+          </div>
+
+          <aside class="side-column">
+            <section class="panel briefing-panel">
+              <div class="panel-heading compact">
+                <div>
+                  <span class="section-kicker">MISSION CONTROL</span>
+                  <h2>Quest briefing</h2>
+                </div>
+                <span class="orb">✦</span>
+              </div>
+
+              <p id="briefing-text" class="muted">
+                Your companion will brief you once a quest is selected.
+              </p>
+
+              <div class="divider"></div>
+
+              <div class="companion-head">
+                <div class="avatar">AI</div>
+                <div>
+                  <strong>NYX</strong>
+                  <span class="companion-sub mono">AI COMPANION</span>
+                </div>
+                <span class="live-tag">LIVE</span>
+              </div>
+
+              <div id="companion-dialogue" class="dialogue">
+                “A good investigator studies the clues before attacking the boss.”
+              </div>
+
+              <div class="action-buttons">
+                <button id="explain-button" class="button button-secondary" type="button" disabled>
+                  Explain issue
+                </button>
+                <button id="hint-button" class="button button-ghost" type="button" disabled>
+                  Give me a hint <span>↗</span>
+                </button>
+              </div>
+
+              <div id="companion-status" class="mini-status" role="status" aria-live="polite"></div>
+
+              <div id="investigation-slot"></div>
+            </section>
+
+            <section class="panel progress-panel">
+              <div class="panel-heading compact">
+                <div>
+                  <span class="section-kicker">PLAYER STATUS</span>
+                  <h2>Investigator profile</h2>
+                </div>
+                <span class="level-badge" id="level-badge">LVL 01</span>
+              </div>
+
+              <div class="xp-row">
+                <span>EXPERIENCE POINTS</span>
+                <strong><span id="xp-value">0</span> XP</strong>
+              </div>
+
+              <div class="progress-track" aria-label="Experience progress">
+                <div id="xp-progress" class="progress-fill" style="width:0%"></div>
+              </div>
+
+              <div class="progress-labels">
+                <span id="level-name">ROOKIE</span>
+                <span id="next-level">100 XP TO LEVEL 2</span>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="stats-grid">
+                <div>
+                  <span class="stat-number" id="completed-count">0</span>
+                  <span class="stat-label">QUESTS CLEARED</span>
+                </div>
+                <div>
+                  <span class="stat-number" id="step-count">0/3</span>
+                  <span class="stat-label">INVESTIGATION STEPS</span>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div class="badge-row">
+                <span class="badge-icon">✧</span>
+                <div>
+                  <strong id="achievement-name">Unranked investigator</strong>
+                  <p id="achievement-description">
+                    Complete your first investigation to earn a badge.
+                  </p>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span class="mono">BUG//DUNGEON</span>
+      <span>Investigate. Understand. Resolve.</span>
+      <span class="mono">BUILD 002</span>
+    </footer>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+
+</html>
