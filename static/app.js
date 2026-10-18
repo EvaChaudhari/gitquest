@@ -1,0 +1,1728 @@
+/* =========================================================
+   BUG DUNGEON — FRONTEND CONTROLLER
+   static/app.js
+   ========================================================= */
+
+(() => {
+  "use strict";
+
+  /* ---------------------------------------------------------
+     STATE
+     --------------------------------------------------------- */
+
+  const state = {
+    repositoryUrl: "",
+    repository: null,
+    quests: [],
+    selectedQuest: null,
+    currentStep: 0,
+    xp: 0,
+    completed: 0,
+    badges: [],
+    scanned: false,
+    loading: false
+  };
+
+  /* ---------------------------------------------------------
+     DOM HELPERS
+     --------------------------------------------------------- */
+
+  const $ = (selector) => document.querySelector(selector);
+
+  const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+  function escapeHtml(value) {
+    if (value === null || value === undefined) return "";
+
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function getRepositoryUrl() {
+    const input =
+      $("#repository-url") ||
+      $("#repo-url") ||
+      $('input[type="url"]') ||
+      $('input[placeholder*="github" i]');
+
+    return input ? input.value.trim() : "";
+  }
+
+  function setRepositoryUrl(value) {
+    const input =
+      $("#repository-url") ||
+      $("#repo-url") ||
+      $('input[type="url"]') ||
+      $('input[placeholder*="github" i]');
+
+    if (input) {
+      input.value = value || "";
+    }
+  }
+
+  /* ---------------------------------------------------------
+     NOTIFICATIONS
+     --------------------------------------------------------- */
+
+  function showMessage(message, type = "info") {
+    let container = $("#toast-container");
+
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "toast-container";
+      container.style.position = "fixed";
+      container.style.right = "24px";
+      container.style.bottom = "24px";
+      container.style.zIndex = "9999";
+      container.style.display = "flex";
+      container.style.flexDirection = "column";
+      container.style.gap = "10px";
+      document.body.appendChild(container);
+    }
+
+    const toast = document.createElement("div");
+
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+
+    toast.style.padding = "12px 16px";
+    toast.style.border = "1px solid rgba(255,255,255,.15)";
+    toast.style.borderRadius = "10px";
+    toast.style.background = "rgba(18, 12, 31, .96)";
+    toast.style.color = "#fff";
+    toast.style.boxShadow = "0 10px 35px rgba(0,0,0,.35)";
+    toast.style.maxWidth = "380px";
+    toast.style.fontSize = "14px";
+
+    if (type === "error") {
+      toast.style.borderColor = "rgba(255, 100, 130, .55)";
+    }
+
+    if (type === "success") {
+      toast.style.borderColor = "rgba(100, 255, 180, .55)";
+    }
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateY(8px)";
+      toast.style.transition = "all .25s ease";
+
+      setTimeout(() => toast.remove(), 300);
+    }, 3500);
+  }
+
+  /* ---------------------------------------------------------
+     LOADING
+     --------------------------------------------------------- */
+
+  function setLoading(isLoading) {
+    state.loading = isLoading;
+
+    const buttons = $$(
+      'button[type="submit"], button[data-action="scan"], #scan-repository, #scan-btn'
+    );
+
+    buttons.forEach((button) => {
+      button.disabled = isLoading;
+
+      if (isLoading) {
+        button.dataset.originalText = button.textContent;
+        button.textContent = "Scanning...";
+      } else if (button.dataset.originalText) {
+        button.textContent = button.dataset.originalText;
+        delete button.dataset.originalText;
+      }
+    });
+  }
+
+  /* ---------------------------------------------------------
+     API
+     --------------------------------------------------------- */
+
+  async function apiRequest(url, options = {}) {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+
+    let data;
+
+    if (contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      data = {
+        message: text
+      };
+    }
+
+    if (!response.ok) {
+      const errorMessage =
+        data?.error ||
+        data?.message ||
+        `Request failed with status ${response.status}`;
+
+      throw new Error(errorMessage);
+    }
+
+    return data;
+  }
+
+  /* ---------------------------------------------------------
+     REPOSITORY SCAN
+     --------------------------------------------------------- */
+
+  async function scanRepository(url) {
+    const repositoryUrl = (url || getRepositoryUrl()).trim();
+
+    if (!repositoryUrl) {
+      showMessage("Please enter a GitHub repository URL.", "error");
+      return;
+    }
+
+    if (
+      !repositoryUrl.startsWith("https://github.com/") &&
+      !repositoryUrl.startsWith("http://github.com/")
+    ) {
+      showMessage("Please enter a valid GitHub repository URL.", "error");
+      return;
+    }
+
+    state.repositoryUrl = repositoryUrl;
+
+    setLoading(true);
+
+    try {
+      /*
+       * Backend contract:
+       *
+       * POST /api/quests
+       *
+       * {
+       *   "repository_url": "https://github.com/user/repo"
+       * }
+       *
+       * The backend should return an object containing an
+       * issues/quests array.
+       */
+
+      const data = await apiRequest("/api/quests", {
+        method: "POST",
+        body: JSON.stringify({
+          repository_url: repositoryUrl,
+          repo_url: repositoryUrl,
+          url: repositoryUrl
+        })
+      });
+
+      const quests =
+        data?.quests ||
+        data?.issues ||
+        data?.data?.quests ||
+        data?.data?.issues ||
+        [];
+
+      state.quests = normalizeQuests(quests);
+
+      state.repository =
+        data?.repository ||
+        data?.repo ||
+        parseRepositoryUrl(repositoryUrl);
+
+      state.scanned = true;
+
+      if (state.quests.length === 0) {
+        showMessage(
+          "Repository scanned, but no quests/issues were found.",
+          "info"
+        );
+      } else {
+        showMessage(
+          `${state.quests.length} quest${state.quests.length === 1 ? "" : "s"} discovered!`,
+          "success"
+        );
+      }
+
+      renderAll();
+    } catch (error) {
+      console.error("Repository scan failed:", error);
+
+      showMessage(
+        error.message ||
+        "Repository scan failed. Check that the repository is public and the backend is running.",
+        "error"
+      );
+
+      showScanError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function parseRepositoryUrl(url) {
+    try {
+      const parsed = new URL(url);
+
+      const parts = parsed.pathname
+        .split("/")
+        .filter(Boolean);
+
+      return {
+        owner: parts[0] || "",
+        name: (parts[1] || "").replace(/\.git$/, ""),
+        url
+      };
+    } catch {
+      return {
+        owner: "",
+        name: "",
+        url
+      };
+    }
+  }
+
+  /* ---------------------------------------------------------
+     QUEST NORMALIZATION
+     --------------------------------------------------------- */
+
+  function normalizeQuests(items) {
+    if (!items) return [];
+
+    let list = items;
+    if (!Array.isArray(list)) {
+      if (typeof list === "object" && (list.quest_id || list.id || list.quest_title || list.title)) {
+        list = [list];
+      } else {
+        return [];
+      }
+    }
+
+    return list.map((item, index) => {
+      // Tags / Labels
+      let labels = [];
+      if (Array.isArray(item.tags)) {
+        labels = item.tags.map((t) => (typeof t === "string" ? t : t?.name || "")).filter(Boolean);
+      } else if (Array.isArray(item.labels)) {
+        labels = item.labels.map((l) => (typeof l === "string" ? l : l?.name || "")).filter(Boolean);
+      }
+
+      const questId = item.quest_id || item.id || `quest-${index}`;
+      const title = item.quest_title || item.title || item.name || `Quest ${index + 1}`;
+      const tagline = item.tagline || "";
+      const category = item.category || "Dungeon Quest";
+      const estimatedTime = item.estimated_time_minutes || item.estimated_time || null;
+
+      // Briefing details
+      let loreIntro = "";
+      let techSummary = "";
+      if (item.briefing && typeof item.briefing === "object") {
+        loreIntro = item.briefing.lore_intro || "";
+        techSummary = item.briefing.technical_summary || "";
+      } else if (typeof item.briefing === "string") {
+        techSummary = item.briefing;
+      }
+
+      const body =
+        techSummary ||
+        item.body ||
+        item.description ||
+        tagline ||
+        loreIntro ||
+        "No description provided.";
+
+      // Quest number extraction
+      let number = item.number ?? item.issue_number;
+      if (!number && questId) {
+        const numMatch = String(questId).match(/\d+$/);
+        number = numMatch ? numMatch[0] : String(questId).replace(/^quest_/, "");
+      }
+      if (!number) number = index + 1;
+
+      const rawDiff = String(item.difficulty || "").toLowerCase();
+      let difficulty = item.difficulty;
+      if (!difficulty) {
+        difficulty = inferDifficulty(item, labels);
+      }
+
+      const xp = Number(item.xp_reward ?? item.xp ?? calculateXp(difficulty));
+
+      // Objectives -> Steps mapping
+      let steps = [];
+      if (Array.isArray(item.objectives) && item.objectives.length) {
+        steps = item.objectives.map((obj, i) => ({
+          id: obj.step || i + 1,
+          title: obj.title || `Objective ${i + 1}`,
+          description: obj.instruction || obj.description || "",
+          instruction: obj.instruction || obj.description || ""
+        }));
+      } else if (Array.isArray(item.steps) && item.steps.length) {
+        steps = item.steps.map((st, i) => ({
+          id: st.id || st.step || i + 1,
+          title: st.title || `Step ${i + 1}`,
+          description: st.instruction || st.description || "",
+          instruction: st.instruction || st.description || ""
+        }));
+      } else {
+        steps = createDefaultSteps(item, title);
+      }
+
+      // Hints
+      let rawHints = [];
+      if (Array.isArray(item.hints)) {
+        rawHints = item.hints;
+      }
+
+      const formattedHints = rawHints.map((h, i) => {
+        if (typeof h === "string") return h;
+        if (typeof h === "object" && h !== null) {
+          const tierStr = h.tier ? `[${h.tier}] ` : "";
+          const costStr = h.xp_cost ? ` (Cost: ${h.xp_cost} XP)` : "";
+          return `${tierStr}${h.hint || ""}${costStr}`;
+        }
+        return `Hint ${i + 1} for ${title}`;
+      });
+
+      // Verification checklist
+      const verificationChecklist = Array.isArray(item.verification_checklist)
+        ? item.verification_checklist
+        : (Array.isArray(item.checklist) ? item.checklist : []);
+
+      return {
+        ...item,
+        id: questId,
+        quest_id: questId,
+        quest_title: title,
+        title,
+        tagline,
+        category,
+        estimated_time_minutes: estimatedTime,
+        number,
+        body,
+        description: body,
+        lore_intro: loreIntro,
+        technical_summary: techSummary,
+        briefing: item.briefing,
+        labels,
+        tags: labels,
+        difficulty,
+        xp,
+        xp_reward: xp,
+        status: item.status || "available",
+        raw_hints: rawHints,
+        hints: formattedHints.length ? formattedHints : [
+          `Analyze the objectives for "${title}".`,
+          `Locate the relevant source files mentioned in the directive.`,
+          `Check syntax and verify against the checklist before completing.`
+        ],
+        steps,
+        objectives: steps,
+        verification_checklist: verificationChecklist,
+        url: item.html_url || item.url || ""
+      };
+    });
+  }
+
+  function inferDifficulty(item, labels = []) {
+    const text = [
+      item.title,
+      item.body,
+      ...labels
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (
+      text.includes("critical") ||
+      text.includes("security") ||
+      text.includes("complex") ||
+      text.includes("architecture")
+    ) {
+      return "hard";
+    }
+
+    if (
+      text.includes("medium") ||
+      text.includes("feature") ||
+      text.includes("refactor")
+    ) {
+      return "medium";
+    }
+
+    return "easy";
+  }
+
+  function calculateXp(difficulty) {
+    switch (String(difficulty).toLowerCase()) {
+      case "hard":
+      case "legendary":
+        return 300;
+
+      case "medium":
+        return 200;
+
+      default:
+        return 100;
+    }
+  }
+
+  function createDefaultSteps(issue, title) {
+    return [
+      {
+        title: "Read the quest",
+        description:
+          issue.body ||
+          `Study the issue "${title}" and understand what is being requested.`
+      },
+      {
+        title: "Locate the source",
+        description:
+          "Find the relevant file, function, component, or module responsible for the behavior."
+      },
+      {
+        title: "Investigate the cause",
+        description:
+          "Trace the existing behavior and determine why the issue occurs."
+      },
+      {
+        title: "Plan the fix",
+        description:
+          "Choose a small, focused change that addresses the root cause."
+      },
+      {
+        title: "Verify the solution",
+        description:
+          "Run the appropriate tests or manually verify that the expected behavior works."
+      }
+    ];
+  }
+
+  /* ---------------------------------------------------------
+     RENDERING
+     --------------------------------------------------------- */
+
+  function renderAll() {
+    renderQuestList();
+    renderSelectedQuest();
+    updateStats();
+    updateWorldState();
+  }
+
+  function findQuestContainer() {
+    return (
+      $("#issues-list") ||
+      $("#quest-list") ||
+      $("#quests") ||
+      $(".issues-list") ||
+      $(".quest-list") ||
+      $('[data-region="quests"]')
+    );
+  }
+
+  function renderQuestList() {
+    const container = findQuestContainer();
+
+    if (!container) return;
+
+    if (!state.scanned) {
+      container.innerHTML = `
+                <div class="empty-state panel">
+                    <div class="empty-icon">⌁</div>
+                    <h3>Your next adventure awaits</h3>
+                    <p>Scan a repository to reveal open issues, clues, and quests.</p>
+                    <span class="empty-code mono">AWAITING_REPOSITORY_INPUT_</span>
+                </div>
+            `;
+      return;
+    }
+
+    if (state.quests.length === 0) {
+      container.innerHTML = `
+                <div class="empty-state panel">
+                    <div class="empty-icon">◇</div>
+                    <h3>No quests found</h3>
+                    <p>This repository did not return any open issues.</p>
+                    <span class="empty-code mono">0_ANOMALIES_DETECTED</span>
+                </div>
+            `;
+      return;
+    }
+
+    container.innerHTML = state.quests
+      .map((quest, index) => {
+        const selected =
+          state.selectedQuest?.id === quest.id;
+
+        const completed =
+          quest.status === "completed";
+
+        const difficultyLower = String(quest.difficulty || "medium").toLowerCase();
+        const isGood = difficultyLower === "easy";
+
+        return `
+                    <article
+                        class="issue-card quest-card ${selected ? "selected" : ""} ${completed ? "cleared completed" : ""}"
+                        data-quest-index="${index}"
+                        tabindex="0"
+                        role="button"
+                    >
+                        <div class="issue-top quest-card-top">
+                            <span class="issue-number quest-number mono">
+                                #${escapeHtml(quest.number)}
+                            </span>
+
+                            <span class="issue-label quest-difficulty ${isGood ? "good" : ""} difficulty-${escapeHtml(difficultyLower)}">
+                                ${escapeHtml(quest.category ? quest.category + " · " : "")}${escapeHtml(String(quest.difficulty || "MEDIUM").toUpperCase())} · +${quest.xp} XP
+                            </span>
+                        </div>
+
+                        <h3 class="issue-title">${escapeHtml(quest.title)}</h3>
+
+                        <p class="issue-body quest-description">
+                            ${quest.tagline
+                              ? `<strong>${escapeHtml(quest.tagline)}</strong><br><span class="muted">${escapeHtml(truncate(quest.technical_summary || quest.body, 130))}</span>`
+                              : `${escapeHtml(truncate(stripMarkdown(quest.body), 160))}`
+                            }
+                        </p>
+
+                        <div class="issue-footer quest-card-bottom">
+                            <div class="labels">
+                                ${quest.labels && quest.labels.length
+                                  ? quest.labels.slice(0, 3).map(l => `<span class="label-chip">${escapeHtml(l)}</span>`).join("")
+                                  : `<span class="label-chip">${escapeHtml(quest.region_name || "Dungeon Sector")}</span>`
+                                }
+                                ${quest.estimated_time_minutes
+                                  ? `<span class="label-chip mono" style="color: #6de8ef; border-color: rgba(109,232,239,0.3);">⏱ ${escapeHtml(quest.estimated_time_minutes)}m</span>`
+                                  : ""
+                                }
+                            </div>
+
+                            <span class="select-quest mono">
+                                ${completed ? "CLEARED ✓" : (selected ? "INVESTIGATING ⚔" : "SELECT QUEST →")}
+                            </span>
+                        </div>
+                    </article>
+                `;
+      })
+      .join("");
+
+    $$(".quest-card, .issue-card").forEach((card) => {
+      const index = Number(card.dataset.questIndex);
+
+      card.addEventListener("click", () => {
+        selectQuest(index);
+      });
+
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectQuest(index);
+        }
+      });
+    });
+  }
+
+  function renderSelectedQuest() {
+    const quest = state.selectedQuest;
+
+    // 1. Update briefing panel elements in index.html if present
+    const briefingText = $("#briefing-text");
+    const companionDialogue = $("#companion-dialogue");
+    const explainButton = $("#explain-button");
+    const hintButton = $("#hint-button");
+    const investigationSlot = $("#investigation-slot");
+
+    if (!quest) {
+      if (briefingText) {
+        briefingText.textContent = "Your companion will brief you once a quest is selected.";
+      }
+      if (companionDialogue) {
+        companionDialogue.textContent = "“A good investigator studies the clues before attacking the boss.”";
+      }
+      if (explainButton) explainButton.disabled = true;
+      if (hintButton) hintButton.disabled = true;
+      if (investigationSlot) investigationSlot.innerHTML = "";
+    } else {
+      if (briefingText) {
+        if (quest.lore_intro || quest.technical_summary) {
+          briefingText.innerHTML = `
+            <strong>${escapeHtml(quest.title)}</strong>
+            ${quest.lore_intro ? `<p style="margin: 6px 0; color: #d6cce7; font-style: italic;">“${escapeHtml(quest.lore_intro)}”</p>` : ""}
+            ${quest.technical_summary ? `<p style="margin: 4px 0; font-size: 11px;"><strong>DIRECTIVE:</strong> ${escapeHtml(quest.technical_summary)}</p>` : ""}
+          `;
+        } else {
+          briefingText.innerHTML = `<strong>Quest #${escapeHtml(quest.number)}:</strong> ${escapeHtml(quest.title)} <br><span class="muted">${escapeHtml(truncate(stripMarkdown(quest.body), 130))}</span>`;
+        }
+      }
+
+      if (companionDialogue && !companionDialogue.dataset.hasCustomMessage) {
+        const loreQuote = quest.lore_intro || quest.tagline;
+        companionDialogue.innerHTML = loreQuote
+          ? `“NYX: ${escapeHtml(loreQuote)}”`
+          : `“Quest <strong>#${escapeHtml(quest.number)}</strong> active (${escapeHtml(quest.difficulty.toUpperCase())} · +${quest.xp} XP). Consult NYX for hints or an explanation.”`;
+      }
+      if (explainButton) explainButton.disabled = false;
+      if (hintButton) hintButton.disabled = false;
+
+      const steps = quest.steps || [];
+
+      if (investigationSlot) {
+        const isAllDone = quest.status === "completed";
+        const hasChecklist = quest.verification_checklist && quest.verification_checklist.length > 0;
+
+        investigationSlot.innerHTML = `
+          <div class="steps">
+            <div class="steps-title mono">
+              OBJECTIVES (${isAllDone ? steps.length : state.currentStep + 1}/${steps.length})
+            </div>
+
+            ${steps.map((step, index) => {
+              const isDone = index < state.currentStep || isAllDone;
+              const isCurrent = index === state.currentStep && !isAllDone;
+
+              return `
+                <label class="step-item ${isDone ? "done" : ""} ${isCurrent ? "current" : ""}">
+                  <input
+                    type="checkbox"
+                    ${isDone ? "checked" : ""}
+                    data-step-index="${index}"
+                    ${isAllDone ? "disabled" : ""}
+                  >
+                  <span>
+                    <strong>${escapeHtml(step.title || `Step ${index + 1}`)}:</strong>
+                    ${escapeHtml(step.description || step.instruction || "")}
+                  </span>
+                </label>
+              `;
+            }).join("")}
+
+            ${hasChecklist ? `
+              <div class="verification-container" style="margin-top: 12px; padding: 10px 12px; border: 1px dashed rgba(114, 245, 189, 0.35); border-radius: 8px; background: rgba(114, 245, 189, 0.04);">
+                <div class="steps-title mono" style="color: var(--green); margin-bottom: 6px;">VERIFICATION CHECKLIST</div>
+                ${quest.verification_checklist.map((v, vi) => `
+                  <label class="step-item" style="margin-top: 5px;">
+                    <input type="checkbox" class="verify-check" data-verify-index="${vi}" ${isAllDone ? "checked disabled" : ""}>
+                    <span style="color: #bbf7d0; font-size: 11px;">${escapeHtml(v)}</span>
+                  </label>
+                `).join("")}
+              </div>
+            ` : ""}
+
+            <button
+              type="button"
+              class="button button-primary complete-button"
+              id="complete-quest"
+              ${isAllDone ? "disabled" : ""}
+            >
+              ${isAllDone ? "Quest Cleared ✓" : (state.currentStep >= steps.length - 1 ? "Complete Quest ✓" : "Advance Objective →")}
+            </button>
+          </div>
+        `;
+
+        investigationSlot.querySelectorAll('input[type="checkbox"][data-step-index]').forEach((checkbox) => {
+          checkbox.addEventListener("change", (e) => {
+            const stepIdx = Number(e.target.dataset.stepIndex);
+            if (e.target.checked) {
+              state.currentStep = Math.min(stepIdx + 1, steps.length - 1);
+            } else {
+              state.currentStep = Math.max(stepIdx, 0);
+            }
+            renderSelectedQuest();
+            renderQuestList();
+            updateStats();
+          });
+        });
+
+        const completeBtn = investigationSlot.querySelector("#complete-quest");
+        if (completeBtn) {
+          completeBtn.addEventListener("click", () => {
+            if (state.currentStep < steps.length - 1) {
+              state.currentStep += 1;
+              renderSelectedQuest();
+              renderQuestList();
+              updateStats();
+            } else {
+              completeQuest();
+            }
+          });
+        }
+      }
+    }
+
+    // 2. Generic container support (#quest-detail / #quest-panel)
+    const container =
+      $("#quest-detail") ||
+      $("#quest-panel") ||
+      $(".quest-detail") ||
+      $('[data-region="quest-detail"]');
+
+    if (!container) return;
+
+    if (!state.selectedQuest) {
+      container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">⚔</div>
+                    <h3>Select a quest</h3>
+                    <p>Choose an issue from the dungeon map to begin your investigation.</p>
+                </div>
+            `;
+      return;
+    }
+
+    const steps = quest.steps || [];
+
+    container.innerHTML = `
+            <div class="quest-detail-header">
+                <div>
+                    <span class="eyebrow">ACTIVE QUEST</span>
+                    <h2>${escapeHtml(quest.title)}</h2>
+                </div>
+
+                <div class="quest-xp">
+                    +${quest.xp} XP
+                </div>
+            </div>
+
+            <div class="quest-description">
+                ${formatMarkdownLite(quest.body)}
+            </div>
+
+            ${quest.url
+        ? `
+                        <a
+                            class="github-link"
+                            href="${escapeHtml(quest.url)}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            Open GitHub issue ↗
+                        </a>
+                    `
+        : ""
+      }
+
+            <div class="investigation-section">
+                <div class="section-heading">
+                    <span>INVESTIGATION</span>
+                    <span>
+                        ${Math.min(
+        state.currentStep + 1,
+        steps.length
+      )}/${steps.length}
+                    </span>
+                </div>
+
+                <div class="investigation-steps">
+                    ${steps
+        .map((step, index) => {
+          const isCurrent =
+            index === state.currentStep;
+
+          const isComplete =
+            index < state.currentStep ||
+            quest.status === "completed";
+
+          return `
+                                <button
+                                    type="button"
+                                    class="investigation-step ${isCurrent ? "current" : ""
+            } ${isComplete ? "complete" : ""}"
+                                    data-step-index="${index}"
+                                >
+                                    <span class="step-number">
+                                        ${isComplete
+              ? "✓"
+              : index + 1
+            }
+                                    </span>
+
+                                    <span class="step-content">
+                                        <strong>
+                                            ${escapeHtml(
+              step.title ||
+              `Step ${index + 1}`
+            )}
+                                        </strong>
+
+                                        <small>
+                                            ${escapeHtml(
+              step.description ||
+              ""
+            )}
+                                        </small>
+                                    </span>
+                                </button>
+                            `;
+        })
+        .join("")}
+                </div>
+            </div>
+
+            <div class="quest-actions">
+                ${state.currentStep > 0
+        ? `
+                            <button
+                                type="button"
+                                class="secondary-button"
+                                id="previous-step"
+                            >
+                                ← Previous
+                            </button>
+                        `
+        : ""
+      }
+
+                ${state.currentStep < steps.length - 1
+        ? `
+                            <button
+                                type="button"
+                                class="primary-button"
+                                id="next-step"
+                            >
+                                Continue →
+                            </button>
+                        `
+        : `
+                            <button
+                                type="button"
+                                class="primary-button"
+                                id="complete-quest-generic"
+                            >
+                                Complete quest ✓
+                            </button>
+                        `
+      }
+
+                <button
+                    type="button"
+                    class="secondary-button"
+                    id="request-hint"
+                >
+                    Ask NYX for a hint
+                </button>
+            </div>
+
+            <div id="nyx-response" class="nyx-response" hidden></div>
+        `;
+
+    $$(".investigation-step").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.currentStep = Number(
+          button.dataset.stepIndex
+        );
+
+        renderSelectedQuest();
+        renderQuestList();
+        updateStats();
+      });
+    });
+
+    const previousButton = $("#previous-step");
+    if (previousButton) {
+      previousButton.addEventListener("click", () => {
+        if (state.currentStep > 0) {
+          state.currentStep -= 1;
+          renderSelectedQuest();
+          renderQuestList();
+          updateStats();
+        }
+      });
+    }
+
+    const nextButton = $("#next-step");
+    if (nextButton) {
+      nextButton.addEventListener("click", () => {
+        if (state.currentStep < steps.length - 1) {
+          state.currentStep += 1;
+          renderSelectedQuest();
+          renderQuestList();
+          updateStats();
+        }
+      });
+    }
+
+    const completeGenericBtn = $("#complete-quest-generic");
+    if (completeGenericBtn) {
+      completeGenericBtn.addEventListener("click", () => {
+        completeQuest();
+      });
+    }
+
+    const hintButtonGeneric = $("#request-hint");
+    if (hintButtonGeneric) {
+      hintButtonGeneric.addEventListener("click", () => {
+        requestHint();
+      });
+    }
+  }
+
+  /* ---------------------------------------------------------
+     QUEST ACTIONS
+     --------------------------------------------------------- */
+
+  function selectQuest(index) {
+    const quest = state.quests[index];
+
+    if (!quest) return;
+
+    state.selectedQuest = quest;
+
+    state.currentStep = 0;
+
+    renderAll();
+
+    const detail =
+      $("#quest-detail") ||
+      $("#quest-panel") ||
+      $(".quest-detail");
+
+    if (detail) {
+      detail.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest"
+      });
+    }
+  }
+
+  function completeQuest() {
+    if (!state.selectedQuest) return;
+
+    const quest = state.selectedQuest;
+
+    if (quest.status === "completed") {
+      return;
+    }
+
+    quest.status = "completed";
+
+    state.completed += 1;
+    state.xp += Number(quest.xp) || 0;
+
+    unlockBadges();
+
+    showMessage(
+      `Quest complete! +${quest.xp} XP`,
+      "success"
+    );
+
+    renderAll();
+  }
+
+  /* ---------------------------------------------------------
+     BADGES
+     --------------------------------------------------------- */
+
+  function unlockBadges() {
+    const badgesToUnlock = [];
+
+    if (
+      state.completed >= 1 &&
+      !state.badges.includes("FIRST_BLOOD")
+    ) {
+      badgesToUnlock.push("FIRST_BLOOD");
+    }
+
+    if (
+      state.completed >= 3 &&
+      !state.badges.includes("DUNGEON_CRAWLER")
+    ) {
+      badgesToUnlock.push("DUNGEON_CRAWLER");
+    }
+
+    if (
+      state.completed >= 5 &&
+      !state.badges.includes("BUG_HUNTER")
+    ) {
+      badgesToUnlock.push("BUG_HUNTER");
+    }
+
+    badgesToUnlock.forEach((badge) => {
+      state.badges.push(badge);
+
+      const names = {
+        FIRST_BLOOD: "First Blood",
+        DUNGEON_CRAWLER: "Dungeon Crawler",
+        BUG_HUNTER: "Bug Hunter"
+      };
+
+      showMessage(
+        `Badge unlocked: ${names[badge]}`,
+        "success"
+      );
+    });
+  }
+
+  /* ---------------------------------------------------------
+     NYX HINTS
+     --------------------------------------------------------- */
+
+  async function requestHint() {
+    if (!state.selectedQuest) {
+      showMessage(
+        "Select a quest before asking NYX for help.",
+        "info"
+      );
+      return;
+    }
+
+    const quest = state.selectedQuest;
+
+    const companionStatus = $("#companion-status");
+    if (companionStatus) {
+      companionStatus.textContent = "NYX is analyzing the quest matrix...";
+    }
+
+    const responseContainer = $("#nyx-response");
+    if (responseContainer) {
+      responseContainer.hidden = false;
+      responseContainer.innerHTML = `
+                <div class="nyx-loading">
+                    NYX is analyzing the dungeon...
+                </div>
+            `;
+    }
+
+    try {
+      const currentStep =
+        quest.steps?.[state.currentStep] || null;
+
+      const data = await apiRequest("/api/hint", {
+        method: "POST",
+        body: JSON.stringify({
+          repository_url: state.repositoryUrl,
+          quest,
+          issue: quest,
+          step: currentStep,
+          step_index: state.currentStep
+        })
+      });
+
+      const hint =
+        data?.hint ||
+        data?.message ||
+        data?.response ||
+        "NYX has no additional hint right now.";
+
+      if (companionStatus) {
+        companionStatus.textContent = "Tactical transmission received.";
+      }
+
+      displayNyxMessage(hint);
+    } catch (error) {
+      console.error("Hint request failed:", error);
+
+      const localHint = getLocalHint(
+        quest,
+        state.currentStep
+      );
+
+      if (companionStatus) {
+        companionStatus.textContent = "Local offline heuristic used.";
+      }
+
+      displayNyxMessage(localHint);
+    }
+  }
+
+  function getLocalHint(quest, stepIndex) {
+    if (Array.isArray(quest.raw_hints) && quest.raw_hints.length) {
+      const h = quest.raw_hints[stepIndex] || quest.raw_hints[0];
+      if (typeof h === "object" && h !== null) {
+        const tier = h.tier ? `Tier: ${h.tier}` : `Level ${h.level || 1}`;
+        const cost = h.xp_cost ? ` *(XP Cost: ${h.xp_cost} XP)*` : "";
+        return `💡 **NYX Tactical Guidance [${tier}]:**\n\n${h.hint || ""}\n\n${cost}`.trim();
+      }
+      return String(h);
+    }
+
+    if (Array.isArray(quest.hints) && quest.hints.length) {
+      return (
+        quest.hints[stepIndex] ||
+        quest.hints[0]
+      );
+    }
+
+    const step = quest.steps?.[stepIndex];
+
+    if (!step) {
+      return "Inspect the quest objectives and verify the required file locations.";
+    }
+
+    const hints = [
+      "Review the technical summary and objective instruction carefully.",
+      "Locate the source files mentioned in the objective instructions.",
+      "Trace the implementation and ensure documentation/code formatting meets standards.",
+      "Double check the verification checklist before completing the quest."
+    ];
+
+    return hints[
+      Math.min(stepIndex, hints.length - 1)
+    ];
+  }
+
+  /* ---------------------------------------------------------
+     NYX EXPLANATION
+     --------------------------------------------------------- */
+
+  async function requestExplanation() {
+    if (!state.selectedQuest) {
+      showMessage(
+        "Select a quest first.",
+        "info"
+      );
+      return;
+    }
+
+    const quest = state.selectedQuest;
+
+    const companionStatus = $("#companion-status");
+    if (companionStatus) {
+      companionStatus.textContent = "NYX is deciphering anomaly...";
+    }
+
+    try {
+      const data = await apiRequest("/api/explain", {
+        method: "POST",
+        body: JSON.stringify({
+          repository_url: state.repositoryUrl,
+          quest,
+          issue: quest
+        })
+      });
+
+      const explanation =
+        data?.explanation ||
+        data?.message ||
+        data?.response;
+
+      if (explanation) {
+        if (companionStatus) {
+          companionStatus.textContent = "Dossier decrypted.";
+        }
+
+        displayNyxMessage(explanation);
+      }
+    } catch (error) {
+      console.error("Explanation request failed:", error);
+
+      if (companionStatus) {
+        companionStatus.textContent = "Local dossier assembled.";
+      }
+
+      const lore = quest.lore_intro ? `⚔ **Sector Transmission:** *"${quest.lore_intro}"*\n\n` : "";
+      const tech = quest.technical_summary ? `📜 **Technical Directive:** ${quest.technical_summary}\n\n` : `📜 **Summary:** ${stripMarkdown(quest.body)}\n\n`;
+      const cat = quest.category ? `🏷 **Category:** \`${quest.category}\` (Threat: \`${String(quest.difficulty).toUpperCase()}\`)\n\n` : "";
+      const tag = quest.tagline ? `🎯 **Mission:** ${quest.tagline}` : "";
+
+      displayNyxMessage(
+        `**NYX ARCHIVE REPORT // QUEST: ${quest.title}**\n\n` +
+        lore +
+        cat +
+        tech +
+        tag
+      );
+    }
+  }
+
+  function displayNyxMessage(message) {
+    const companionDialogue = $("#companion-dialogue");
+    if (companionDialogue) {
+      companionDialogue.dataset.hasCustomMessage = "true";
+      companionDialogue.innerHTML = formatMarkdownLite(message);
+    }
+
+    const container = $("#nyx-response");
+    if (container) {
+      container.hidden = false;
+      container.innerHTML = `
+            <div class="nyx-header">
+                <span class="nyx-avatar">N</span>
+                <strong>NYX</strong>
+            </div>
+
+            <div class="nyx-message">
+                ${formatMarkdownLite(message)}
+            </div>
+        `;
+    }
+  }
+
+  /* ---------------------------------------------------------
+     ERROR DISPLAY
+     --------------------------------------------------------- */
+
+  function showScanError(message) {
+    const container = findQuestContainer();
+
+    if (!container) return;
+
+    container.innerHTML = `
+            <div class="error-state">
+                <div class="error-icon">!</div>
+
+                <h3>Repository scan failed</h3>
+
+                <p>
+                    ${escapeHtml(
+      message ||
+      "The server could not retrieve the repository."
+    )}
+                </p>
+
+                <p class="error-help">
+                    Make sure your Flask backend is running and that
+                    <code>/api/quests</code> is available.
+                </p>
+            </div>
+        `;
+  }
+
+  /* ---------------------------------------------------------
+     STATS / HUD
+     --------------------------------------------------------- */
+
+  function updateStats() {
+    const xpElements = [
+      $("#xp"),
+      $("#xp-value"),
+      $('[data-stat="xp"]')
+    ];
+
+    xpElements.forEach((element) => {
+      if (element) {
+        element.textContent = state.xp;
+      }
+    });
+
+    const completedElements = [
+      $("#completed"),
+      $("#completed-value"),
+      $("#completed-count"),
+      $('[data-stat="completed"]')
+    ];
+
+    completedElements.forEach((element) => {
+      if (element) {
+        element.textContent = state.completed;
+      }
+    });
+
+    const questCountElements = [
+      $("#quest-count"),
+      $('[data-stat="quests"]')
+    ];
+
+    questCountElements.forEach((element) => {
+      if (element) {
+        element.textContent = `${state.quests.length} QUESTS FOUND`;
+      }
+    });
+
+    const badgeCountElements = [
+      $("#badge-count"),
+      $('[data-stat="badges"]')
+    ];
+
+    badgeCountElements.forEach((element) => {
+      if (element) {
+        element.textContent = state.badges.length;
+      }
+    });
+
+    const level =
+      Math.floor(state.xp / 500) + 1;
+
+    const levelElements = [
+      $("#level"),
+      $("#level-value"),
+      $('[data-stat="level"]')
+    ];
+
+    levelElements.forEach((element) => {
+      if (element) {
+        element.textContent = level;
+      }
+    });
+
+    const levelBadge = $("#level-badge");
+    if (levelBadge) {
+      levelBadge.textContent = `LVL 0${level}`;
+    }
+
+    const levelTitles = ["ROOKIE", "APPRENTICE", "BUG HUNTER", "CODE SORCERER", "DUNGEON MASTER"];
+    const levelName = $("#level-name");
+    if (levelName) {
+      levelName.textContent = levelTitles[Math.min(level - 1, levelTitles.length - 1)];
+    }
+
+    const nextLevel = $("#next-level");
+    if (nextLevel) {
+      const needed = 500 - (state.xp % 500);
+      nextLevel.textContent = `${needed} XP TO LEVEL ${level + 1}`;
+    }
+
+    const stepCount = $("#step-count");
+    if (stepCount) {
+      const total = state.selectedQuest?.steps?.length || 5;
+      const current = state.selectedQuest
+        ? (state.selectedQuest.status === "completed" ? total : state.currentStep + 1)
+        : 0;
+      stepCount.textContent = `${current}/${total}`;
+    }
+
+    const progress =
+      ((state.xp % 500) / 500) * 100;
+
+    $$("#xp-progress, .xp-progress, .xp-bar-fill, .progress-fill").forEach(
+      (element) => {
+        element.style.width = `${progress}%`;
+      }
+    );
+
+    // Update Achievement / Badge HUD
+    const achName = $("#achievement-name");
+    const achDesc = $("#achievement-description");
+    if (achName && achDesc) {
+      if (state.completed >= 5) {
+        achName.textContent = "Bug Hunter";
+        achDesc.textContent = "Elite exterminator — 5 quests conquered.";
+      } else if (state.completed >= 3) {
+        achName.textContent = "Dungeon Crawler";
+        achDesc.textContent = "Delved deep and conquered 3 dungeon quests.";
+      } else if (state.completed >= 1) {
+        achName.textContent = "First Blood";
+        achDesc.textContent = "Slew your first bug in the dungeon.";
+      } else {
+        achName.textContent = "Unranked investigator";
+        achDesc.textContent = "Complete your first investigation to earn a badge.";
+      }
+    }
+  }
+
+  function updateWorldState() {
+    const world =
+      $("#world-map") ||
+      $(".world-map") ||
+      $('[data-region="world"]');
+
+    if (world) {
+      if (!state.scanned) {
+        world.classList.add("locked");
+      } else {
+        world.classList.remove("locked");
+      }
+    }
+
+    const coords = $("#map-coordinates");
+    if (coords) {
+      coords.textContent = state.repository
+        ? `${state.repository.owner.toUpperCase()} / ${state.repository.name.toUpperCase()}`
+        : "SECTOR 00 · UNINITIALIZED";
+    }
+
+    const regionMsg = $("#region-message");
+    if (regionMsg) {
+      regionMsg.textContent = state.scanned
+        ? `Debugging realm active: ${state.quests.length} open quest${state.quests.length === 1 ? "" : "s"} discovered in repository.`
+        : "Scan a repository to activate the world map.";
+    }
+
+    const regionCounts = { forest: 0, swamp: 0, citadel: 0, wastes: 0, core: 0 };
+    const regionKeys = Object.keys(regionCounts);
+
+    state.quests.forEach((q, idx) => {
+      const reg = q.region || regionKeys[idx % regionKeys.length];
+      if (regionCounts[reg] !== undefined) {
+        regionCounts[reg] += 1;
+      }
+    });
+
+    $$(".region-node").forEach((node) => {
+      const reg = node.dataset.region;
+      const count = regionCounts[reg] || 0;
+      const stateSpan = node.querySelector(".node-state");
+      if (stateSpan) {
+        if (!state.scanned) {
+          stateSpan.textContent = reg === "core" ? "CORE" : (reg === "citadel" || reg === "wastes" ? "LOCKED" : "UNSCANNED");
+        } else {
+          stateSpan.textContent = count > 0 ? `ACTIVE (${count})` : "SECURE";
+        }
+      }
+    });
+  }
+
+  /* ---------------------------------------------------------
+     SEARCH / FILTER
+     --------------------------------------------------------- */
+
+  function filterQuests(searchTerm) {
+    const term = String(searchTerm || "")
+      .trim()
+      .toLowerCase();
+
+    $$(".quest-card, .issue-card").forEach((card) => {
+      if (!term) {
+        card.style.display = "";
+        return;
+      }
+
+      const text = card.textContent.toLowerCase();
+
+      card.style.display =
+        text.includes(term)
+          ? ""
+          : "none";
+    });
+  }
+
+  /* ---------------------------------------------------------
+     MARKDOWN-LITE
+     --------------------------------------------------------- */
+
+  function stripMarkdown(text) {
+    return String(text || "")
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/\*([^*]+)\*/g, "$1")
+      .replace(/__([^_]+)__/g, "$1")
+      .replace(/_([^_]+)_/g, "$1")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/^\s*[-*+]\s+/gm, "")
+      .replace(/^\s*\d+\.\s+/gm, "")
+      .trim();
+  }
+
+  function formatMarkdownLite(text) {
+    let html = escapeHtml(String(text || ""));
+
+    html = html.replace(
+      /```([\s\S]*?)```/g,
+      "<pre><code>$1</code></pre>"
+    );
+
+    html = html.replace(
+      /`([^`]+)`/g,
+      "<code>$1</code>"
+    );
+
+    html = html.replace(
+      /\*\*([^*]+)\*\*/g,
+      "<strong>$1</strong>"
+    );
+
+    html = html.replace(
+      /\*([^*]+)\*/g,
+      "<em>$1</em>"
+    );
+
+    html = html.replace(
+      /^### (.+)$/gm,
+      "<h4>$1</h4>"
+    );
+
+    html = html.replace(
+      /^## (.+)$/gm,
+      "<h3>$1</h3>"
+    );
+
+    html = html.replace(
+      /^# (.+)$/gm,
+      "<h2>$1</h2>"
+    );
+
+    html = html.replace(
+      /\n/g,
+      "<br>"
+    );
+
+    return html;
+  }
+
+  function truncate(text, length) {
+    const value = String(text || "");
+
+    if (value.length <= length) {
+      return value;
+    }
+
+    return value.slice(0, length).trimEnd() + "…";
+  }
+
+  /* ---------------------------------------------------------
+     EVENT BINDING
+     --------------------------------------------------------- */
+
+  function bindScanButtons() {
+    const selectors = [
+      "#scan-button",
+      "#scan-repository",
+      "#scan-btn",
+      '[data-action="scan"]'
+    ];
+
+    selectors.forEach((selector) => {
+      $$(selector).forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          scanRepository();
+        });
+      });
+    });
+
+    $$("form").forEach((form) => {
+      const hasRepositoryInput =
+        form.querySelector(
+          'input[type="url"], input[name*="repo" i], input[placeholder*="github" i]'
+        );
+
+      if (!hasRepositoryInput) return;
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        scanRepository(
+          hasRepositoryInput.value
+        );
+      });
+    });
+  }
+
+  function bindSearch() {
+    const searchInputs = $$(
+      '#quest-search, [data-action="search"], input[placeholder*="search" i]'
+    );
+
+    searchInputs.forEach((input) => {
+      input.addEventListener("input", () => {
+        filterQuests(input.value);
+      });
+    });
+  }
+
+  function bindExplanationButtons() {
+    $$(
+      '#explain-button, #explain-quest, [data-action="explain"]'
+    ).forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        requestExplanation();
+      });
+    });
+
+    $$(
+      '#hint-button, #request-hint, [data-action="hint"]'
+    ).forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        requestHint();
+      });
+    });
+
+    // Bind region map nodes to filter by region
+    $$(".region-node").forEach((node) => {
+      node.addEventListener("click", () => {
+        const regionId = node.dataset.region;
+        const regionFilter = $("#quest-filter");
+
+        if (node.classList.contains("active")) {
+          node.classList.remove("active");
+          filterQuests("");
+          if (regionFilter) regionFilter.textContent = "ALL REGIONS";
+        } else {
+          $$(".region-node").forEach((n) => n.classList.remove("active"));
+          node.classList.add("active");
+          const regName = node.querySelector(".node-name")?.textContent || regionId;
+          if (regionFilter) regionFilter.textContent = regName;
+
+          // Filter cards belonging to this region
+          $$(".quest-card, .issue-card").forEach((card) => {
+            const idx = Number(card.dataset.questIndex);
+            const quest = state.quests[idx];
+            if (quest && (quest.region === regionId || card.textContent.toLowerCase().includes(regionId))) {
+              card.style.display = "";
+            } else {
+              card.style.display = "none";
+            }
+          });
+        }
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------
+     INITIALIZATION
+     --------------------------------------------------------- */
+
+  function init() {
+    bindScanButtons();
+    bindSearch();
+    bindExplanationButtons();
+
+    renderAll();
+
+    /*
+     * Allow the page to receive a repository URL through
+     * ?repo=https://github.com/user/repository
+     */
+
+    try {
+      const params =
+        new URLSearchParams(
+          window.location.search
+        );
+
+      const repo = params.get("repo");
+
+      if (repo) {
+        setRepositoryUrl(repo);
+      }
+    } catch {
+      // Ignore malformed URL parameters.
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      init
+    );
+  } else {
+    init();
+  }
+
+  function loadQuests(questsData) {
+    state.quests = normalizeQuests(questsData);
+    state.scanned = true;
+    if (state.quests.length > 0) {
+      state.selectedQuest = state.quests[0];
+      state.currentStep = 0;
+    }
+    renderAll();
+  }
+
+  /* ---------------------------------------------------------
+     PUBLIC API
+     --------------------------------------------------------- */
+
+  window.BugDungeon = {
+    state,
+    loadQuests,
+    scanRepository,
+    selectQuest,
+    completeQuest,
+    requestHint,
+    requestExplanation,
+    filterQuests
+  };
+})();
