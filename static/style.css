@@ -1369,3 +1369,53 @@ footer .mono {
     transition-duration: .01ms !important;
   }
 }
+
+/* ============================================================
+   QUEST TAGLINES, TIME CHIPS & VERIFICATION CHECKLIST
+   ============================================================ */
+.time-chip {
+  background: rgba(109, 232, 239, 0.08) !important;
+  color: var(--cyan) !important;
+  border: 1px solid rgba(109, 232, 239, 0.28) !important;
+  font-weight: 500;
+}
+
+.verification-container {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: rgba(114, 245, 189, 0.05);
+  border: 1px dashed rgba(114, 245, 189, 0.35);
+  border-radius: 9px;
+}
+
+.verification-container .steps-title {
+  color: var(--green);
+  font-weight: 600;
+  margin-bottom: 7px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.verification-container .step-item {
+  color: #c7eedc;
+}
+
+.verification-container input[type="checkbox"] {
+  accent-color: var(--green);
+}
+
+.briefing-lore {
+  padding: 8px 10px;
+  background: rgba(185, 138, 255, 0.08);
+  border-left: 2px solid var(--purple);
+  margin-bottom: 8px;
+  border-radius: 0 6px 6px 0;
+  font-size: 11px;
+}
+
+.briefing-tech {
+  font-size: 11px;
+  color: #d1c8e2;
+  line-height: 1.5;
+}
